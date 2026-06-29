@@ -51,6 +51,19 @@ async function verifyMeetSignedIn(page) {
       `Google Meet redirected to account chooser/sign-in (${url}). Select the bot account and wait for Meet to load before saving auth.json.`,
     );
   }
+  const hostname = new URL(url).hostname;
+  if (hostname !== "meet.google.com") {
+    const text = await page
+      .locator("body")
+      .innerText({ timeout: 1000 })
+      .catch(() => "");
+    throw new Error(
+      `Google Meet did not load a signed-in Meet page. Expected meet.google.com but landed on ${url}. Select the bot account and wait until the signed-in Meet home page loads before pressing Enter. Page text: ${text
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 500)}`,
+    );
+  }
 
   const signedInMeet = await page
     .locator(
@@ -60,19 +73,13 @@ async function verifyMeetSignedIn(page) {
     .isVisible({ timeout: 1500 })
     .catch(() => false);
 
-  const createMeetingVisible = await page
-    .getByText(/new meeting|enter a code or link|join/i)
-    .first()
-    .isVisible({ timeout: 1500 })
-    .catch(() => false);
-
-  if (!signedInMeet && !createMeetingVisible) {
+  if (!signedInMeet) {
     const text = await page
       .locator("body")
       .innerText({ timeout: 1000 })
       .catch(() => "");
     throw new Error(
-      `Google Meet did not look signed in. url=${url}; page=${text
+      `Google Meet loaded without a confirmed signed-in Google account. url=${url}; page=${text
         .replace(/\s+/g, " ")
         .trim()
         .slice(0, 500)}`,

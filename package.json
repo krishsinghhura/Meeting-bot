@@ -9,7 +9,11 @@
     "bot"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev --workspace backend\" \"npm run dev --workspace frontend\"",
+    "dev": "concurrently \"npm run dev:backend:local\" \"npm run dev:frontend\"",
+    "dev:backend:local": "npm run dev --prefix src/backend",
+    "dev:frontend": "npm run dev --prefix src/frontend",
+    "build:bot": "docker compose build bot",
+    "build:backend": "npm run build --prefix src/backend",
     "generate": "prisma generate --schema=src/backend/schema.prisma",
     "migrate": "prisma migrate dev --schema=src/backend/schema.prisma",
     "studio": "prisma studio --schema=src/backend/schema.prisma",

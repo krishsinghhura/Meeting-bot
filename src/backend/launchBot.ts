@@ -1,5 +1,10 @@
 // src/backend/botLauncher.ts
 import Docker from "dockerode";
+import {
+  getBackendCallbackUrl,
+  getBotDatabaseUrl,
+  getBotNetwork,
+} from "./env";
 
 // init Docker client
 const docker = new Docker();
@@ -14,13 +19,15 @@ export async function launchBotContainer(meetingUrl: string, jobId: string) {
     `JOB_ID=${jobId}`,
     `GOOGLE_ACCOUNT_USER=${process.env.GOOGLE_ACCOUNT_USER ?? ""}`,
     `GOOGLE_ACCOUNT_PASSWORD=${process.env.GOOGLE_ACCOUNT_PASSWORD ?? ""}`,
-    `DATABASE_URL=${process.env.DATABASE_URL}`,
+    `DATABASE_URL=${getBotDatabaseUrl()}`,
+    `BACKEND_CALLBACK_URL=${getBackendCallbackUrl()}`,
   ];
   const binds: string[] = [];
   if (process.env.AUTH_STATE_HOST_PATH) {
     env.push("AUTH_STATE_PATH=/app/auth.json");
     binds.push(`${process.env.AUTH_STATE_HOST_PATH}:/app/auth.json:ro`);
   }
+  const botNetwork = getBotNetwork();
 
   // create Docker container with bot image to run, env vars, run cmd
   const container = await docker.createContainer({
@@ -30,9 +37,8 @@ export async function launchBotContainer(meetingUrl: string, jobId: string) {
     HostConfig: {
       // comment out autoremove for debugging, otherwise cleans after exit
       AutoRemove: true,
-      // specifies Docker network to connect to
-      NetworkMode: "meetingbot-net",
       Binds: binds,
+      ...(botNetwork ? { NetworkMode: botNetwork } : {}),
     },
   });
 

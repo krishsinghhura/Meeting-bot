@@ -6,3 +6,7 @@ authOG.json
 **/dist
 .npm-cache
 *.env
+
+# Generated JS beside TS source files makes ts-node load stale code first
+/src/*.js
+/src/playwright/*.js

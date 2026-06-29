@@ -3,6 +3,7 @@ import { existsSync } from "fs";
 import { saveTranscriptBatch } from "../storage";
 import { v4 as uuidv4 } from "uuid";
 import { Segment } from "src/models";
+import { backendCallback } from "../callback";
 
 // bot will leave the meeting immediately if it hears any of the following phrases
 const EXIT_PHRASES = [
@@ -105,7 +106,7 @@ async function notifyBackendFailure(meetingId: string, err: unknown) {
 
   const error = err instanceof Error ? err.message : String(err);
   try {
-    const res = await fetch("http://backend:3001/bot-failed", {
+    const res = await fetch(backendCallback("/bot-failed"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jobId, meetingId, error }),
@@ -124,10 +125,17 @@ async function logGoogleAuthState(page: Page) {
 
   const url = page.url();
   const bodyText = await getPageTextSnippet(page);
+  const hostname = new URL(url).hostname;
 
   if (/accounts\.google\.com/.test(url)) {
     throw new Error(
       `Google auth is not complete; redirected to account chooser/sign-in (${url}). Regenerate auth.json and select the bot Google account before saving.`,
+    );
+  }
+
+  if (hostname !== "meet.google.com") {
+    throw new Error(
+      `Google auth is not complete; expected meet.google.com but landed on ${url}. Regenerate auth.json and wait until the signed-in Google Meet home page loads before saving. Page text: ${bodyText}`,
     );
   }
 
@@ -139,19 +147,13 @@ async function logGoogleAuthState(page: Page) {
     .isVisible({ timeout: 1500 })
     .catch(() => false);
 
-  const createMeetingVisible = await page
-    .getByText(/new meeting|enter a code or link|join/i)
-    .first()
-    .isVisible({ timeout: 1500 })
-    .catch(() => false);
-
-  if (signedInMeet || createMeetingVisible) {
+  if (signedInMeet) {
     console.log(`[auth] Google Meet session appears usable (${url})`);
     return;
   }
 
-  console.warn(
-    `[auth] Google Meet session could not be confirmed. url=${url}; page=${bodyText}`,
+  throw new Error(
+    `Google auth is not complete; Meet loaded without a confirmed signed-in Google account (${url}). Regenerate auth.json and select the bot account before saving. Page text: ${bodyText}`,
   );
 }
 
@@ -489,7 +491,7 @@ async function scrapeCaptions(
     if (!jobId)
       console.warn("Missing JOB_ID env var - backend completion will not run");
     else {
-      const res = await fetch("http://backend:3001/bot-done", {
+      const res = await fetch(backendCallback("/bot-done"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobId, meetingId }),

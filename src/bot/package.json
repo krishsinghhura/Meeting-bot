@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "main": "index.js",
   "scripts": {
-    "start": "node dist/bot/index.js",
-    "build": "tsc --project src/bot/tsconfig.json",
-    "dev": "ts-node-dev --respawn src/bot/index.ts"
+    "start": "node ../../dist/bot/index.js",
+    "build": "tsc --project tsconfig.json",
+    "dev": "TS_NODE_PREFER_TS_EXTS=true ts-node-dev --respawn index.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",

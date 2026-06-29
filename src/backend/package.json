@@ -4,8 +4,8 @@
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
-    "dev": "ts-node-dev --respawn server.ts",
-    "start": "node dist/server.js"
+    "dev": "TS_NODE_PREFER_TS_EXTS=true ts-node-dev --respawn --transpile-only server.ts",
+    "start": "node ../dist/backend/server.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

@@ -11,6 +11,7 @@
   "include": [
     "../bot/**/*.ts",
     "../playwright/**/*.ts",
+    "../callback.ts",
     "../models.ts",
     "../storage.ts"
   ]

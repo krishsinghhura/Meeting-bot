@@ -1,3 +1,4 @@
+import "./loadEnv";
 import express from "express";
 import cors from "cors";
 import {
@@ -7,6 +8,7 @@ import {
   updateMeetingStatus,
 } from "../storage";
 import { launchBotContainer } from "./launchBot";
+import { describeDatabaseUrl } from "./env";
 
 const app = express();
 // turn on CORS for frontend at localhost:5173
@@ -124,7 +126,9 @@ app.post("/bot-failed", async (req, res) => {
   }
 });
 
-// start server on port 3000
-app.listen(3001, "0.0.0.0", () => {
-  console.log("Backend listening on port 3001");
+const port = Number(process.env.PORT ?? 3001);
+
+app.listen(port, "0.0.0.0", () => {
+  console.log(`Backend listening on port ${port}`);
+  console.log(`Backend database: ${describeDatabaseUrl()}`);
 });
