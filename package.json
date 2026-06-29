@@ -18,7 +18,8 @@
     "migrate": "prisma migrate dev --schema=src/backend/schema.prisma",
     "studio": "prisma studio --schema=src/backend/schema.prisma",
     "format": "prettier --write .",
-    "gen:auth": "node scripts/generate-auth.js"
+    "gen:auth": "node scripts/generate-auth.js",
+    "auth:refresh": "node scripts/refresh-auth.js"
   },
   "devDependencies": {
     "@types/node": "^22.15.14",

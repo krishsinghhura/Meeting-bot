@@ -1,6 +1,7 @@
 // src/backend/botLauncher.ts
 import Docker from "dockerode";
 import {
+  getAuthStateHostPath,
   getBackendCallbackUrl,
   getBotDatabaseUrl,
   getBotNetwork,
@@ -13,6 +14,7 @@ const docker = new Docker();
 export async function launchBotContainer(meetingUrl: string, jobId: string) {
   // assign container a unique name using timestamp
   const containerName = `meetingbot-${Date.now()}`;
+  const authStateHostPath = getAuthStateHostPath();
 
   const env = [
     `MEETING_URL=${meetingUrl}`,
@@ -23,9 +25,11 @@ export async function launchBotContainer(meetingUrl: string, jobId: string) {
     `BACKEND_CALLBACK_URL=${getBackendCallbackUrl()}`,
   ];
   const binds: string[] = [];
-  if (process.env.AUTH_STATE_HOST_PATH) {
+  if (authStateHostPath) {
+    const readOnlyAuth = process.env.AUTH_STATE_READONLY === "1";
     env.push("AUTH_STATE_PATH=/app/auth.json");
-    binds.push(`${process.env.AUTH_STATE_HOST_PATH}:/app/auth.json:ro`);
+    env.push(`AUTH_STATE_WRITE_BACK=${readOnlyAuth ? "0" : "1"}`);
+    binds.push(`${authStateHostPath}:/app/auth.json:${readOnlyAuth ? "ro" : "rw"}`);
   }
   const botNetwork = getBotNetwork();
 
@@ -52,5 +56,17 @@ export async function launchBotContainer(meetingUrl: string, jobId: string) {
   docker.modem.demuxStream(stream, process.stdout, process.stderr);
 
   console.log(`Started bot container: ${containerName}`);
-  return containerName;
+  if (authStateHostPath) {
+    console.log(
+      `[auth] Mounted Playwright storage state from ${authStateHostPath} (${process.env.AUTH_STATE_READONLY === "1" ? "read-only" : "read-write"})`,
+    );
+  } else {
+    console.warn("[auth] No auth.json found or AUTH_STATE_HOST_PATH configured; bot will run without signed-in storage state");
+  }
+
+  return {
+    containerName,
+    authStateHostPath,
+    authStateMounted: Boolean(authStateHostPath),
+  };
 }

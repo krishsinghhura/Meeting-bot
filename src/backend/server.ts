@@ -37,17 +37,25 @@ function validateMeetLink(url: string) {
 // endpoint to start bot with given url
 app.post("/submit-link", async (req, res) => {
   const { url } = req.body;
-  if (!url) return res.status(400).send(`Missing the URL`);
-  if (!validateMeetLink(url)) return res.status(400).send(`Invalid link`);
+  if (!url) return res.status(400).json({ error: "missing_url" });
+  if (!validateMeetLink(url)) return res.status(400).json({ error: "invalid_meet_link" });
 
   try {
     const job = await createMeetingJob(url);
-    await launchBotContainer(url, job.id);
+    const launch = await launchBotContainer(url, job.id);
 
-    res.send(`Bot started for meeting`);
+    res.status(202).json({
+      status: "started",
+      message: "Bot started for meeting",
+      jobId: job.id,
+      meetingUrl: url,
+      containerName: launch.containerName,
+      authMode: launch.authStateMounted ? "auth_json" : "guest",
+      authStateMounted: launch.authStateMounted,
+    });
   } catch (err) {
     console.error(err);
-    res.status(500).send(`Failed to launch bot`);
+    res.status(500).json({ error: "failed_to_launch_bot" });
   }
 });
 

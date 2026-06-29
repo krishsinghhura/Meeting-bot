@@ -36,8 +36,8 @@ export async function runBot(url: string): Promise<string> {
     args: [
       "--no-sandbox",
       "--enable-unsafe-swiftshader",
-      "--use-fake-ui-for-media-stream",
-      "--use-fake-device-for-media-stream",
+      "--mute-audio",
+      "--deny-permission-prompts",
     ],
   });
 
@@ -61,8 +61,6 @@ export async function runBot(url: string): Promise<string> {
   page.on("console", (msg) => console.log(`[page:${msg.type()}]`, msg.text()));
 
   try {
-    await context.tracing.start({ screenshots: true, snapshots: true });
-
     await logGoogleAuthState(page);
     await page.goto(url, { waitUntil: "domcontentloaded" });
 
@@ -92,11 +90,31 @@ export async function runBot(url: string): Promise<string> {
     const mid = await scrapeCaptions(page, meetingId, createdAt);
     console.log("done scraping. Returning meetingId.");
 
-    await context.tracing.stop({ path: "run.zip" });
     return mid;
   } catch (err) {
     await notifyBackendFailure(meetingId, err);
     throw new Error(`Run Bot error: ${err}`);
+  } finally {
+    await persistAuthState(context, authStatePath, hasAuthState);
+    await browser.close().catch(() => undefined);
+  }
+}
+
+async function persistAuthState(
+  context: BrowserContext,
+  authStatePath: string,
+  hasAuthState: boolean,
+) {
+  if (!hasAuthState || process.env.AUTH_STATE_WRITE_BACK === "0") {
+    return;
+  }
+
+  try {
+    await context.storageState({ path: authStatePath });
+    console.log(`[auth] Refreshed storage state at ${authStatePath}`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[auth] Could not refresh storage state at ${authStatePath}: ${message}`);
   }
 }
 
@@ -798,11 +816,6 @@ async function ensureCaptionsOn(page: Page, timeoutMs = 60_000) {
     console.log("Region aria-label:", label);
   }
 
-  // screenshot for debug
-  const timestamp = Date.now();
-  const path = `/tmp/captions-failure-${timestamp}.png`;
-  await page.screenshot({ path });
-  console.error(`captions could not be enabled – see ${path}`);
   throw new Error("could not enable captions using Shift+C or button");
 }
 

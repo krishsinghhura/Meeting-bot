@@ -17,9 +17,14 @@ form.addEventListener("submit", async (e) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url: url }),
     });
-    // display response text from server
-    const inputText = await res.text();
-    statusElem.innerText = inputText;
+    const payload = await res.json();
+    if (!res.ok) {
+      statusElem.innerText = payload.error || "Failed to launch bot";
+      return;
+    }
+
+    statusElem.innerText =
+      `${payload.message}. Job ${payload.jobId}. Auth: ${payload.authMode}.`;
   } catch {
     // basic error if request fails
     statusElem.innerText = `Error occurred`;

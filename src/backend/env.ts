@@ -1,4 +1,6 @@
 import "./loadEnv";
+import { existsSync } from "fs";
+import path from "path";
 
 const DEFAULT_CALLBACK_URL = "http://host.docker.internal:3001";
 
@@ -34,4 +36,14 @@ export function getBackendCallbackUrl() {
 
 export function getBotNetwork() {
   return process.env.BOT_NETWORK;
+}
+
+export function getAuthStateHostPath() {
+  const configuredPath = process.env.AUTH_STATE_HOST_PATH;
+  if (configuredPath) {
+    return path.resolve(configuredPath);
+  }
+
+  const defaultPath = path.resolve(process.cwd(), "auth.json");
+  return existsSync(defaultPath) ? defaultPath : null;
 }

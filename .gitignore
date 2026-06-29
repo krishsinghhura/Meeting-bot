@@ -1,4 +1,5 @@
 # Output and env files
+auth.json
 authOG.json
 .auth-browser-profile
 .auth-browser-profile-*
