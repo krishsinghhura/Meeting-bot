@@ -1,0 +1,17 @@
+// src/bot/tsconfig.json
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "../",
+    "outDir": "../../dist",
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "types": ["node", "playwright"]
+  },
+  "include": [
+    "../bot/**/*.ts",
+    "../playwright/**/*.ts",
+    "../models.ts",
+    "../storage.ts"
+  ]
+}

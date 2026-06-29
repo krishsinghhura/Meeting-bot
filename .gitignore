@@ -1,0 +1,8 @@
+# Output and env files
+authOG.json
+.auth-browser-profile
+.auth-browser-profile-*
+**/node_modules
+**/dist
+.npm-cache
+*.env

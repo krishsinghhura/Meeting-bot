@@ -1,0 +1,8 @@
+.git
+.npm-cache
+node_modules
+src/*/node_modules
+src/dist
+dist
+auth.json
+*.env
