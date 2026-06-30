@@ -44,6 +44,27 @@ export function getAuthStateHostPath() {
     return path.resolve(configuredPath);
   }
 
-  const defaultPath = path.resolve(process.cwd(), "auth.json");
+  const defaultPath = resolveExistingPath("auth.json");
   return existsSync(defaultPath) ? defaultPath : null;
+}
+
+export function getTeamsAuthStateHostPath() {
+  const configuredPath = process.env.TEAMS_AUTH_STATE_HOST_PATH;
+  if (configuredPath) {
+    return path.resolve(configuredPath);
+  }
+
+  const defaultPath = resolveExistingPath("teams-auth.json");
+  return existsSync(defaultPath) ? defaultPath : null;
+}
+
+function resolveExistingPath(filename: string) {
+  const candidates = [
+    path.resolve(process.cwd(), filename),
+    path.resolve(process.cwd(), "../../", filename),
+    path.resolve(__dirname, "../../", filename),
+    path.resolve(__dirname, "../../../", filename),
+  ];
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
 }

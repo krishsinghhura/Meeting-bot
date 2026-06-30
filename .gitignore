@@ -1,12 +1,17 @@
 # Output and env files
 auth.json
+
+teams-auth.json
 authOG.json
 .auth-browser-profile
 .auth-browser-profile-*
+.teams-auth-browser-profile
+.teams-auth-browser-profile-*
 **/node_modules
 **/dist
 .npm-cache
 *.env
+local-artifacts/
 
 # Generated JS beside TS source files makes ts-node load stale code first
 /src/*.js

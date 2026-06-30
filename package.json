@@ -19,7 +19,10 @@
     "studio": "prisma studio --schema=src/backend/schema.prisma",
     "format": "prettier --write .",
     "gen:auth": "node scripts/generate-auth.js",
-    "auth:refresh": "node scripts/refresh-auth.js"
+    "auth:refresh": "node scripts/refresh-auth.js",
+    "gen:teams-auth": "node scripts/generate-teams-auth.js",
+    "teams-auth:refresh": "node scripts/refresh-teams-auth.js",
+    "export:vtt": "node scripts/export-vtt.js"
   },
   "devDependencies": {
     "@types/node": "^22.15.14",

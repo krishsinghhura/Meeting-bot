@@ -65,6 +65,9 @@ GOOGLE_ACCOUNT_USER=your-bot-google-email
 GOOGLE_ACCOUNT_PASSWORD=your-bot-google-password
 AUTH_STATE_HOST_PATH=/absolute/path/to/meeting-bot/auth.json
 AUTH_STATE_READONLY=0
+TEAMS_AUTH_STATE_HOST_PATH=/absolute/path/to/meeting-bot/teams-auth.json
+TEAMS_AUTH_STATE_READONLY=0
+TEAMS_ADMISSION_TIMEOUT_MS=600000
 AUTH_BROWSER=chrome
 AUTH_BROWSER_PATH=
 ```
@@ -76,7 +79,10 @@ Notes:
 - `BACKEND_CALLBACK_URL` is the URL bot containers use to call the backend on your host machine.
 - `AUTH_STATE_HOST_PATH` can point to the generated `auth.json` file. If it is empty, the backend uses `./auth.json` when that file exists.
 - `AUTH_STATE_READONLY=0` lets the bot write refreshed Playwright storage state back to `auth.json` after runs. Set it to `1` for a read-only mount.
-- Do not commit `.env` or `auth.json`.
+- `TEAMS_AUTH_STATE_HOST_PATH` can point to generated Microsoft Teams auth state. If it is empty, the backend uses `./teams-auth.json` when that file exists.
+- `TEAMS_AUTH_STATE_READONLY=0` lets the bot write refreshed Teams storage state back to `teams-auth.json` after Teams runs. Set it to `1` for a read-only mount.
+- `TEAMS_ADMISSION_TIMEOUT_MS` controls how long the Teams bot waits in the lobby after asking to join.
+- Do not commit `.env`, `auth.json`, or `teams-auth.json`.
 
 ## Generate Google Auth State
 
@@ -95,6 +101,22 @@ npm run auth:refresh
 ```
 
 This opens Google Meet with the current `auth.json`, verifies that it reaches Meet as a signed-in account, and rewrites the storage state. It cannot bypass a Google sign-in, 2FA, recovery, or device challenge. If refresh reports that Google redirected to sign-in, run `npm run gen:auth` again.
+
+Generate the signed-in Microsoft Teams browser state used by Teams bot runs:
+
+```bash
+npm run gen:teams-auth
+```
+
+This opens a browser session for the Microsoft account. Complete sign-in and wait until Teams itself is loaded before pressing Enter. The script writes `teams-auth.json`.
+
+Refresh a still-valid saved Teams session:
+
+```bash
+npm run teams-auth:refresh
+```
+
+Teams auth is separate from Google auth. `auth.json` is only for Google Meet; `teams-auth.json` is only for Microsoft Teams.
 
 ## Build The Bot Image
 
@@ -149,7 +171,9 @@ http://localhost:5173
 7. Speak while captions are enabled in the meeting.
 8. End the meeting or say `Notetaker, please leave` when you want the bot to exit.
 
-The frontend posts the URL to `POST /submit-link`. The backend creates a meeting job and launches one Docker bot container with `MEETING_URL=<submitted Meet URL>`. If an auth state file is available, it is mounted into the bot container at `/app/auth.json` and the bot joins as that signed-in Google account. The target meeting still needs to allow or admit that account.
+The frontend posts the URL to `POST /submit-link`. The backend detects the provider, creates a meeting job, and launches one Docker bot container with `MEETING_URL=<submitted meeting URL>`.
+
+For Google Meet, `auth.json` is mounted at `/app/auth.json` when available. For Microsoft Teams, `teams-auth.json` is mounted at `/app/teams-auth.json` when available. If the provider-specific auth file is missing, the bot falls back to guest web join. The target meeting still needs to allow or admit the bot account.
 
 When the run finishes, the transcript is saved and the backend logs the completion payload, job row, and transcript.
 

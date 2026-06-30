@@ -5,20 +5,35 @@ import {
   getBackendCallbackUrl,
   getBotDatabaseUrl,
   getBotNetwork,
+  getTeamsAuthStateHostPath,
 } from "./env";
 
 // init Docker client
 const docker = new Docker();
 
+type MeetingProvider = "google_meet" | "microsoft_teams";
+
 // launch Docker container to run mtg bot
-export async function launchBotContainer(meetingUrl: string, jobId: string) {
+export async function launchBotContainer(
+  meetingUrl: string,
+  jobId: string,
+  provider: MeetingProvider,
+) {
   // assign container a unique name using timestamp
   const containerName = `meetingbot-${Date.now()}`;
-  const authStateHostPath = getAuthStateHostPath();
+  const authStateHostPath =
+    provider === "google_meet" ? getAuthStateHostPath() : getTeamsAuthStateHostPath();
+  const authStateContainerPath =
+    provider === "google_meet" ? "/app/auth.json" : "/app/teams-auth.json";
+  const readOnlyAuth =
+    provider === "google_meet"
+      ? process.env.AUTH_STATE_READONLY === "1"
+      : process.env.TEAMS_AUTH_STATE_READONLY === "1";
 
   const env = [
     `MEETING_URL=${meetingUrl}`,
     `JOB_ID=${jobId}`,
+    `MEETING_PROVIDER=${provider}`,
     `GOOGLE_ACCOUNT_USER=${process.env.GOOGLE_ACCOUNT_USER ?? ""}`,
     `GOOGLE_ACCOUNT_PASSWORD=${process.env.GOOGLE_ACCOUNT_PASSWORD ?? ""}`,
     `DATABASE_URL=${getBotDatabaseUrl()}`,
@@ -26,10 +41,13 @@ export async function launchBotContainer(meetingUrl: string, jobId: string) {
   ];
   const binds: string[] = [];
   if (authStateHostPath) {
-    const readOnlyAuth = process.env.AUTH_STATE_READONLY === "1";
-    env.push("AUTH_STATE_PATH=/app/auth.json");
+    env.push(
+      provider === "google_meet"
+        ? `AUTH_STATE_PATH=${authStateContainerPath}`
+        : `TEAMS_AUTH_STATE_PATH=${authStateContainerPath}`,
+    );
     env.push(`AUTH_STATE_WRITE_BACK=${readOnlyAuth ? "0" : "1"}`);
-    binds.push(`${authStateHostPath}:/app/auth.json:${readOnlyAuth ? "ro" : "rw"}`);
+    binds.push(`${authStateHostPath}:${authStateContainerPath}:${readOnlyAuth ? "ro" : "rw"}`);
   }
   const botNetwork = getBotNetwork();
 
@@ -58,10 +76,12 @@ export async function launchBotContainer(meetingUrl: string, jobId: string) {
   console.log(`Started bot container: ${containerName}`);
   if (authStateHostPath) {
     console.log(
-      `[auth] Mounted Playwright storage state from ${authStateHostPath} (${process.env.AUTH_STATE_READONLY === "1" ? "read-only" : "read-write"})`,
+      `[auth] Mounted Playwright storage state from ${authStateHostPath} (${readOnlyAuth ? "read-only" : "read-write"})`,
     );
-  } else {
+  } else if (provider === "google_meet") {
     console.warn("[auth] No auth.json found or AUTH_STATE_HOST_PATH configured; bot will run without signed-in storage state");
+  } else {
+    console.warn("[auth] No teams-auth.json found or TEAMS_AUTH_STATE_HOST_PATH configured; Teams bot will run as guest");
   }
 
   return {

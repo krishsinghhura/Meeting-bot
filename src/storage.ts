@@ -84,6 +84,33 @@ export async function getTranscript(
   };
 }
 
+export async function saveMeetingArtifact(input: {
+  meetingId: string;
+  kind: string;
+  mimeType: string;
+  storagePath: string;
+  fileSizeBytes: number;
+  segmentCount: number;
+  generatedAt: Date;
+}) {
+  return await prisma.meetingArtifact.upsert({
+    where: {
+      meetingId_kind: {
+        meetingId: input.meetingId,
+        kind: input.kind,
+      },
+    },
+    update: {
+      mimeType: input.mimeType,
+      storagePath: input.storagePath,
+      fileSizeBytes: input.fileSizeBytes,
+      segmentCount: input.segmentCount,
+      generatedAt: input.generatedAt,
+    },
+    create: input,
+  });
+}
+
 // update status of job (summarized, transcript_saved, etc)
 export async function updateMeetingStatus(
   id: string,

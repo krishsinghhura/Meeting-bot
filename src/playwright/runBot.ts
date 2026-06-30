@@ -5,6 +5,8 @@ import { v4 as uuidv4 } from "uuid";
 import { Segment } from "src/models";
 import { backendCallback } from "../callback";
 
+type MeetingProvider = "google_meet" | "microsoft_teams";
+
 // bot will leave the meeting immediately if it hears any of the following phrases
 const EXIT_PHRASES = [
   "notetaker, please leave",
@@ -16,15 +18,22 @@ const EXIT_PHRASES = [
 // flush interval to save captions
 const FLUSH_EVERY_MS = 1_000;
 
-// selector used to detect the meeting has ended
+// selector used to detect the Google Meet meeting has ended
 const LEAVE_BANNER_SEL =
   'body > div[role="heading"]:has-text("You left the meeting"),' +
   'body > div[role="heading"]:has-text("You’ve left the call"),' +
   'body > div[role="heading"]:has-text("You’ve been removed from the meeting"),' +
   'body > div[role="heading"]:has-text("You\'ve been removed from the meeting")';
+const MEET_ENDED_TEXT =
+  /you left the meeting|you.ve left the call|you.ve been removed from the meeting|you have been removed from the meeting|return to home screen|rejoin/i;
 
-// launches broswer, joins Google Meet, records captions
+const TEAMS_CAPTIONS_CONTAINER_SEL =
+  'div[data-tid="closed-caption-renderer-wrapper"]';
+const DEFAULT_TEAMS_ADMISSION_TIMEOUT_MS = 10 * 60 * 1000;
+
+// launches browser, detects provider, joins meeting, records captions
 export async function runBot(url: string): Promise<string> {
+  const provider = providerFromUrl(url);
   const meetingId = uuidv4();
   const createdAt = new Date();
 
@@ -38,66 +47,133 @@ export async function runBot(url: string): Promise<string> {
       "--enable-unsafe-swiftshader",
       "--mute-audio",
       "--deny-permission-prompts",
+      ...(provider === "microsoft_teams"
+        ? [
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+          ]
+        : []),
     ],
   });
 
-  const authStatePath = process.env.AUTH_STATE_PATH ?? "auth.json";
-  const hasAuthState = existsSync(authStatePath);
-  if (hasAuthState) {
+  const authStatePath =
+    provider === "google_meet"
+      ? process.env.AUTH_STATE_PATH ?? "auth.json"
+      : process.env.TEAMS_AUTH_STATE_PATH ?? "teams-auth.json";
+  const shouldUseAuthState = existsSync(authStatePath);
+  if (shouldUseAuthState) {
     console.log(`[auth] Using Playwright storage state from ${authStatePath}`);
-  } else {
+  } else if (provider === "google_meet") {
     console.warn(
       `[auth] No Playwright storage state found at ${authStatePath}; continuing without a signed-in Google session`,
     );
+  } else {
+    console.warn(
+      `[auth] No Teams storage state found at ${authStatePath}; continuing as a Teams guest`,
+    );
   }
 
-  const contextOptions = hasAuthState
-    ? { storageState: authStatePath }
-    : undefined;
+  const contextOptions: {
+    storageState?: string;
+    viewport?: { width: number; height: number };
+    userAgent?: string;
+  } = {};
+  if (shouldUseAuthState) {
+    contextOptions.storageState = authStatePath;
+  }
+  if (provider === "microsoft_teams") {
+    contextOptions.viewport = { width: 1280, height: 720 };
+    contextOptions.userAgent =
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
+  }
   const context: BrowserContext = await browser.newContext(contextOptions);
   const page = await context.newPage();
+  let canPersistAuthState = false;
 
   // for debugging so that you see all console lines in terminal
   page.on("console", (msg) => console.log(`[page:${msg.type()}]`, msg.text()));
 
   try {
-    await logGoogleAuthState(page);
-    await page.goto(url, { waitUntil: "domcontentloaded" });
+    console.log(`[orchestrator] Detected provider: ${provider}`);
+    if (provider === "google_meet") {
+      if (shouldUseAuthState) {
+        await logGoogleAuthState(page);
+        canPersistAuthState = true;
+      }
+      return await runGoogleMeetBot(page, url, meetingId, createdAt);
+    }
 
-    // mute mic, turn off camera, clear popup
-    await clickIfVisible(page, 'button[aria-label*="Turn off microphone"]');
-    await clickIfVisible(page, 'button[aria-label*="Turn off camera"]');
-    await clickIfVisible(page, 'button:has-text("Got it")');
-
-    console.log("Current URL:", page.url());
-    console.log(
-      "Visible buttons on screen:",
-      await page.locator("button").allTextContents(),
+    canPersistAuthState = shouldUseAuthState;
+    return await runMicrosoftTeamsBot(
+      page,
+      url,
+      meetingId,
+      createdAt,
+      shouldUseAuthState,
     );
-
-    // join/ask to join, handle 2-step join preview, close modals, wait until in meeting
-    await clickJoin(page);
-    await collapsePreviewIfNeeded(page);
-    await dismissOverlays(page);
-    await waitUntilJoined(page);
-    console.log("joined meeting");
-
-    // turn captions on
-    await ensureCaptionsOn(page);
-    console.log("captions visible");
-
-    // scrape captions
-    const mid = await scrapeCaptions(page, meetingId, createdAt);
-    console.log("done scraping. Returning meetingId.");
-
-    return mid;
   } catch (err) {
     await notifyBackendFailure(meetingId, err);
     throw new Error(`Run Bot error: ${err}`);
   } finally {
-    await persistAuthState(context, authStatePath, hasAuthState);
+    await persistAuthState(context, authStatePath, canPersistAuthState);
     await browser.close().catch(() => undefined);
   }
+}
+
+function providerFromUrl(url: string): MeetingProvider {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`Unsupported meeting URL: ${url}`);
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+  if (hostname === "meet.google.com") {
+    return "google_meet";
+  }
+  if (hostname === "teams.microsoft.com" || hostname === "teams.live.com") {
+    return "microsoft_teams";
+  }
+
+  throw new Error(`Unsupported meeting URL host: ${hostname}`);
+}
+
+async function runGoogleMeetBot(
+  page: Page,
+  url: string,
+  meetingId: string,
+  createdAt: Date,
+): Promise<string> {
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+
+  // mute mic, turn off camera, clear popup
+  await clickIfVisible(page, 'button[aria-label*="Turn off microphone"]');
+  await clickIfVisible(page, 'button[aria-label*="Turn off camera"]');
+  await clickIfVisible(page, 'button:has-text("Got it")');
+
+  console.log("Current URL:", page.url());
+  console.log(
+    "Visible buttons on screen:",
+    await page.locator("button").allTextContents(),
+  );
+
+  // join/ask to join, handle 2-step join preview, close modals, wait until in meeting
+  await clickJoin(page);
+  await collapsePreviewIfNeeded(page);
+  await dismissOverlays(page);
+  await waitUntilJoined(page);
+  console.log("joined meeting");
+
+  // turn captions on
+  await ensureCaptionsOn(page);
+  console.log("captions visible");
+
+  // scrape captions
+  const mid = await scrapeCaptions(page, meetingId, createdAt);
+  console.log("done scraping. Returning meetingId.");
+
+  return mid;
 }
 
 async function persistAuthState(
@@ -132,6 +208,501 @@ async function notifyBackendFailure(meetingId: string, err: unknown) {
     console.log(`[bot-failed] ${res.status}`);
   } catch (postErr) {
     console.error("[bot-failed] POST failed:", postErr);
+  }
+}
+
+async function runMicrosoftTeamsBot(
+  page: Page,
+  url: string,
+  meetingId: string,
+  createdAt: Date,
+  hasAuthState: boolean,
+): Promise<string> {
+  const displayName = process.env.BOT_DISPLAY_NAME || "Boom Notetaker";
+  const launchUrl = await resolveTeamsLaunchUrlWithoutDialog(url, hasAuthState);
+
+  await page.goto(launchUrl.toString(), { waitUntil: "domcontentloaded" });
+  console.log(`[teams] Opened launch URL: ${page.url()}`);
+
+  await clickTeamsJoinOnWeb(page);
+  await joinTeamsPrejoin(page, displayName);
+
+  if (await isTeamsInLobby(page, 10_000)) {
+    console.log("[teams] Bot is waiting in Teams lobby.");
+  }
+
+  await waitUntilTeamsJoined(page, teamsAdmissionTimeoutMs());
+  console.log("[teams] joined meeting");
+
+  await enableTeamsCaptions(page);
+  console.log("[teams] captions visible");
+
+  const mid = await scrapeTeamsCaptions(page, meetingId, createdAt);
+  console.log("[teams] done scraping. Returning meetingId.");
+  return mid;
+}
+
+function teamsAdmissionTimeoutMs() {
+  const configured = Number(process.env.TEAMS_ADMISSION_TIMEOUT_MS || "");
+  return Number.isFinite(configured) && configured > 0
+    ? configured
+    : DEFAULT_TEAMS_ADMISSION_TIMEOUT_MS;
+}
+
+async function resolveTeamsLaunchUrlWithoutDialog(
+  meetingUrl: string,
+  preferSignedIn: boolean,
+): Promise<URL> {
+  try {
+    const response = await fetch(meetingUrl, { redirect: "follow" });
+    const launchUrl = new URL(response.url);
+    if (preferSignedIn) {
+      removeAnonymousTeamsLaunchParams(launchUrl);
+    }
+    launchUrl.searchParams.set("msLaunch", "false");
+    launchUrl.searchParams.set("type", "meetup-join");
+    launchUrl.searchParams.set("directDl", "true");
+    launchUrl.searchParams.set("enableMobilePage", "true");
+    launchUrl.searchParams.set("suppressPrompt", "true");
+    console.log(`[teams] resolved launch URL: ${launchUrl.toString()}`);
+    return launchUrl;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Unable to resolve Teams launch URL: ${message}`);
+  }
+}
+
+function removeAnonymousTeamsLaunchParams(launchUrl: URL) {
+  launchUrl.searchParams.delete("anon");
+
+  const nestedUrl = launchUrl.searchParams.get("url");
+  if (nestedUrl) {
+    launchUrl.searchParams.set("url", removeAnonymousTeamsUrlParam(nestedUrl));
+  }
+}
+
+function removeAnonymousTeamsUrlParam(value: string) {
+  const parsed = new URL(value, "https://teams.live.com");
+  parsed.searchParams.delete("anon");
+  parsed.hash = removeAnonymousTeamsHashParam(parsed.hash);
+
+  if (/^https?:\/\//i.test(value)) {
+    return parsed.toString();
+  }
+
+  return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+}
+
+function removeAnonymousTeamsHashParam(hash: string) {
+  if (!hash) return hash;
+
+  const questionIndex = hash.indexOf("?");
+  if (questionIndex === -1) return hash;
+
+  const route = hash.slice(0, questionIndex);
+  const params = new URLSearchParams(hash.slice(questionIndex + 1));
+  params.delete("anon");
+
+  const query = params.toString();
+  return query ? `${route}?${query}` : route;
+}
+
+async function clickTeamsJoinOnWeb(page: Page) {
+  if (await isTeamsPrejoinReady(page, 3000)) {
+    console.log("[teams] already on signed-in web prejoin screen");
+    return;
+  }
+
+  if (
+    await page
+      .locator('input[placeholder="Type your name"]')
+      .first()
+      .isVisible({ timeout: 3000 })
+      .catch(() => false)
+  ) {
+    console.log("[teams] already on web join lobby");
+    return;
+  }
+
+  const selectors = [
+    'button[data-tid="joinOnWeb"]',
+    'button:has-text("Continue on this browser")',
+    'button:has-text("Join on the web instead")',
+    'button:has-text("Use the web app instead")',
+  ];
+
+  for (const selector of selectors) {
+    if (await clickIfVisible(page, selector, 30_000)) {
+      console.log(`[teams] clicked web join control: ${selector}`);
+      return;
+    }
+  }
+
+  const pageText = await getPageTextSnippet(page);
+  throw new Error(`Teams did not show a web join control. Page text: ${pageText}`);
+}
+
+async function isTeamsPrejoinReady(page: Page, timeoutMs = 1000): Promise<boolean> {
+  return page
+    .locator('button:has-text("Join now")')
+    .first()
+    .isVisible({ timeout: timeoutMs })
+    .catch(() => false);
+}
+
+async function joinTeamsPrejoin(page: Page, displayName: string) {
+  const nameInput = page.locator('input[placeholder="Type your name"]').first();
+  const hasGuestNameInput = await nameInput
+    .isVisible({ timeout: 10_000 })
+    .catch(() => false);
+
+  if (hasGuestNameInput) {
+    await nameInput.fill(displayName);
+    console.log(`[teams] entered guest display name: ${displayName}`);
+  } else {
+    console.log("[teams] no guest name input visible; continuing with signed-in Teams identity");
+  }
+
+  await disableTeamsPrejoinMedia(page);
+
+  const joinNow = page.locator('button:has-text("Join now")').first();
+  await joinNow
+    .waitFor({ state: "visible", timeout: 45_000 })
+    .catch(async (err) => {
+      const state = await getTeamsPageState(page);
+      throw new Error(
+        `Teams prejoin did not show Join now. url=${state.url}; buttons=${JSON.stringify(
+          state.buttons,
+        )}; page=${state.bodyText}; cause=${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
+  await clickLocator(joinNow, 'Teams "Join now"');
+  console.log('[teams] clicked "Join now"');
+}
+
+async function disableTeamsPrejoinMedia(page: Page) {
+  for (const selector of [
+    'button:has-text("Don\'t use audio")',
+    'button:has-text("No audio")',
+    'div[role="button"]:has-text("Don\'t use audio")',
+    'div[role="button"]:has-text("No audio")',
+  ]) {
+    if (await clickIfVisible(page, selector, 1500)) {
+      console.log(`[teams] selected no-audio option: ${selector}`);
+      break;
+    }
+  }
+
+  const toggles = [
+    'button[aria-label*="Microphone"]',
+    'button[aria-label*="Camera"]',
+    '[data-tid*="toggle-mute"]',
+    '[data-tid*="toggle-video"]',
+  ];
+
+  for (const selector of toggles) {
+    const controls = page.locator(selector);
+    const count = await controls.count().catch(() => 0);
+    for (let i = 0; i < count; i++) {
+      const control = controls.nth(i);
+      const label = [
+        await control.getAttribute("aria-label").catch(() => ""),
+        await control.getAttribute("title").catch(() => ""),
+        await control.textContent().catch(() => ""),
+      ].join(" ");
+      if (
+        /turn off|mute microphone|mic is on|microphone is on|camera is on|turn camera off|turn microphone off/i.test(
+          label,
+        )
+      ) {
+        await clickLocator(control, `Teams media control ${selector}`, 1000).catch(() => undefined);
+      }
+    }
+  }
+}
+
+async function isTeamsInLobby(page: Page, timeoutMs = 1000): Promise<boolean> {
+  return page
+    .getByText(/someone will let you in shortly|waiting for someone to let you in|you.re in the lobby|you.re waiting in the lobby|when someone lets you in|admit you/i)
+    .first()
+    .isVisible({ timeout: timeoutMs })
+    .catch(() => false);
+}
+
+async function waitUntilTeamsJoined(page: Page, timeoutMs = 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastState = "";
+
+  while (Date.now() < deadline) {
+    const inMeeting = await page
+      .locator(
+        'button[id="hangup-button"], button[aria-label*="Leave"], button[title*="Leave"], [data-tid*="hangup"], [data-tid*="leave"]',
+      )
+      .first()
+      .isVisible({ timeout: 1000 })
+      .catch(() => false);
+
+    if (inMeeting) {
+      return;
+    }
+
+    if (await isTeamsInLobby(page, 1000)) {
+      const state = await getTeamsPageState(page);
+      if (state.signature !== lastState) {
+        lastState = state.signature;
+        console.log(`[teams] lobby wait state: ${state.signature}`);
+      }
+      await page.waitForTimeout(1500);
+      continue;
+    }
+
+    const state = await getTeamsPageState(page);
+    if (state.signature !== lastState) {
+      lastState = state.signature;
+      console.log(`[teams] join wait state: ${state.signature}`);
+    }
+
+    const bodyText = state.bodyText.toLowerCase();
+    if (
+      bodyText.includes("meeting has ended") ||
+      bodyText.includes("someone in the meeting should let you in soon") ||
+      bodyText.includes("we couldn't connect you")
+    ) {
+      throw new Error(`Teams join failed or stalled. Page text: ${bodyText}`);
+    }
+
+    await page.waitForTimeout(1000);
+  }
+
+  const state = await getTeamsPageState(page);
+  throw new Error(
+    `Teams bot was not admitted within ${timeoutMs}ms. url=${state.url}; buttons=${JSON.stringify(
+      state.buttons,
+    )}; page=${state.bodyText}`,
+  );
+}
+
+async function getTeamsPageState(page: Page) {
+  const bodyText = await getPageTextSnippet(page);
+  const buttons = (await getVisibleButtonLabels(page)).slice(0, 20);
+  return {
+    url: page.url(),
+    bodyText,
+    buttons,
+    signature: `url=${page.url()} buttons=${JSON.stringify(buttons)} text=${bodyText.slice(0, 240)}`,
+  };
+}
+
+async function enableTeamsCaptions(page: Page) {
+  await page
+    .locator(TEAMS_CAPTIONS_CONTAINER_SEL)
+    .first()
+    .waitFor({ state: "visible", timeout: 3000 })
+    .then(() => undefined)
+    .catch(() => undefined);
+
+  if (await isTeamsCaptionsVisible(page, 500)) {
+    return;
+  }
+
+  const moreButton = page.locator('button[id="callingButtons-showMoreBtn"]').first();
+  await moreButton.waitFor({ state: "visible", timeout: 120_000 });
+  await clickLocator(moreButton, 'Teams "More" button');
+  console.log('[teams] clicked "More"');
+
+  const captionsButton = page.locator('div[id="closed-captions-button"]').first();
+  await captionsButton.waitFor({ state: "visible", timeout: 120_000 });
+  await clickLocator(captionsButton, 'Teams "Captions" button');
+  console.log('[teams] clicked "Captions"');
+
+  await page
+    .locator(TEAMS_CAPTIONS_CONTAINER_SEL)
+    .first()
+    .waitFor({ state: "visible", timeout: 120_000 });
+}
+
+async function isTeamsCaptionsVisible(page: Page, timeoutMs = 1000): Promise<boolean> {
+  return page
+    .locator(TEAMS_CAPTIONS_CONTAINER_SEL)
+    .first()
+    .isVisible({ timeout: timeoutMs })
+    .catch(() => false);
+}
+
+async function scrapeTeamsCaptions(
+  page: Page,
+  meetingId: string,
+  createdAt: Date,
+): Promise<string> {
+  let index = 0;
+  let exitRequested = false;
+  const segments: Segment[] = [];
+  const seenFingerprints = new Set<string>();
+
+  await page.exposeFunction(
+    "onTeamsCaption",
+    async (caption: { participant?: { name?: string }; text?: string }) => {
+      const text = String(caption.text || "").replace(/\s+/g, " ").trim();
+      if (!text || !/[.,!?]$/.test(text)) {
+        return;
+      }
+
+      const speaker = String(caption.participant?.name || "Unknown Speaker").trim();
+      const fingerprint = `${speaker}\n${text.replace(/[.,'"!~-]/g, "")}`;
+      if (seenFingerprints.has(fingerprint)) {
+        return;
+      }
+      seenFingerprints.add(fingerprint);
+
+      const normalized = text.toLowerCase();
+      const isExit = EXIT_PHRASES.some((phrase) => normalized.includes(phrase));
+      if (isExit) {
+        console.log("[teams] Exit phrase heard - hanging up");
+        exitRequested = true;
+      }
+
+      const segment = {
+        speaker,
+        text,
+        start: index,
+        end: index + 1,
+        meetingId,
+      };
+      index += 1;
+      segments.push(segment);
+      console.log(`[teams caption] ${speaker}: ${text}`);
+      await saveTranscriptBatch(meetingId, createdAt, segments);
+    },
+  );
+
+  await page.waitForSelector(TEAMS_CAPTIONS_CONTAINER_SEL, { timeout: 120_000 });
+
+  await page.evaluate((captionsContainerSelector) => {
+    const targetNode = document.querySelector(captionsContainerSelector);
+    if (!targetNode) {
+      return;
+    }
+
+    const observeCaptionMessage = (element: Element) => {
+      const captionMessage =
+        element.matches(".fui-ChatMessageCompact")
+          ? element
+          : element.querySelector(".fui-ChatMessageCompact");
+      if (!captionMessage) {
+        return;
+      }
+
+      const authorElement = captionMessage.querySelector('span[data-tid="author"]');
+      const contentElement = captionMessage.querySelector('span[data-tid="closed-caption-text"]');
+      if (!authorElement || !contentElement) {
+        return;
+      }
+
+      const emit = () => {
+        const name = authorElement.textContent?.trim() || "Unknown Speaker";
+        const text = (contentElement as HTMLElement).innerText?.trim() || "";
+        void (window as any).onTeamsCaption?.({
+          participant: { name },
+          text,
+          started_at: {
+            absolute_timestamp: new Date().toISOString(),
+          },
+        });
+      };
+
+      emit();
+      new MutationObserver(emit).observe(contentElement, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+    };
+
+    targetNode.querySelectorAll(".fui-ChatMessageCompact").forEach(observeCaptionMessage);
+
+    new MutationObserver((mutationsList) => {
+      for (const mutation of mutationsList) {
+        if (mutation.type !== "childList") {
+          continue;
+        }
+        mutation.addedNodes.forEach((node) => {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            observeCaptionMessage(node as Element);
+          }
+        });
+      }
+    }).observe(targetNode, { childList: true, subtree: true });
+  }, TEAMS_CAPTIONS_CONTAINER_SEL);
+
+  const flushTimer = setInterval(async () => {
+    if (segments.length) {
+      await saveTranscriptBatch(meetingId, createdAt, segments);
+    }
+  }, FLUSH_EVERY_MS);
+
+  try {
+    const deadline = Date.now() + 100 * 60 * 1000;
+    while (Date.now() < deadline) {
+      if (exitRequested) {
+        await leaveTeamsMeeting(page);
+        break;
+      }
+
+      if (await isTeamsMeetingEnded(page)) {
+        break;
+      }
+
+      await page.waitForTimeout(1000);
+    }
+
+    if (Date.now() >= deadline) {
+      throw new Error("Hard timeout (100 min) exceeded");
+    }
+  } finally {
+    clearInterval(flushTimer);
+  }
+
+  await saveTranscriptBatch(meetingId, createdAt, segments, true);
+  await notifyBackendDone(meetingId);
+  console.log(`Teams meeting ${meetingId}: ${segments.length} segments captured`);
+  return meetingId;
+}
+
+async function leaveTeamsMeeting(page: Page) {
+  const leaveButton = page
+    .locator('button[id="hangup-button"], button[aria-label*="Leave"]')
+    .first();
+  if (await leaveButton.isVisible({ timeout: 1000 }).catch(() => false)) {
+    await clickLocator(leaveButton, "Teams leave button");
+  }
+}
+
+async function isTeamsMeetingEnded(page: Page): Promise<boolean> {
+  const text = (await getPageTextSnippet(page)).toLowerCase();
+  return (
+    text.includes("you left the meeting") ||
+    text.includes("meeting has ended") ||
+    text.includes("you've been removed") ||
+    text.includes("you have been removed")
+  );
+}
+
+async function notifyBackendDone(meetingId: string) {
+  const jobId = process.env.JOB_ID;
+  if (!jobId) {
+    console.warn("Missing JOB_ID env var - backend completion will not run");
+    return;
+  }
+
+  try {
+    const res = await fetch(backendCallback("/bot-done"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobId, meetingId }),
+    });
+    console.log(`[bot-done] ${res.status}`);
+  } catch (err) {
+    console.error("[bot-done] POST failed:", err);
   }
 }
 
@@ -489,6 +1060,7 @@ async function scrapeCaptions(
       await leaveCall();
     })(),
     page.waitForSelector(LEAVE_BANNER_SEL, { timeout: 0 }),
+    waitForGoogleMeetEndedText(page),
     new Promise((_, rej) =>
       setTimeout(
         () => rej(new Error("Hard timeout (100 min) exceeded")),
@@ -503,24 +1075,25 @@ async function scrapeCaptions(
 
   await saveTranscriptBatch(meetingId, createdAt, finalSegments, true);
 
-  // done, notify backend to log the saved transcript
-  try {
-    const jobId = process.env.JOB_ID;
-    if (!jobId)
-      console.warn("Missing JOB_ID env var - backend completion will not run");
-    else {
-      const res = await fetch(backendCallback("/bot-done"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId, meetingId }),
-      });
-      console.log(`[bot-done] ${res.status}`);
-    }
-  } catch (err) {
-    console.error("[bot-done] POST failed:", err);
-  }
+  await notifyBackendDone(meetingId);
   console.log(`Meeting ${meetingId}: ${segments.length} segments captured`);
   return meetingId;
+}
+
+async function waitForGoogleMeetEndedText(page: Page) {
+  while (true) {
+    const pageText = await getPageTextSnippet(page);
+    const buttons = await getVisibleButtonLabels(page);
+    if (
+      MEET_ENDED_TEXT.test(pageText) ||
+      buttons.some((button) => MEET_ENDED_TEXT.test(button))
+    ) {
+      console.log(`[meet] detected meeting end/removal state: ${pageText}`);
+      return;
+    }
+
+    await page.waitForTimeout(1000);
+  }
 }
 
 // click visible element by selector, true if successful
