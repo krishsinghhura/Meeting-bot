@@ -186,6 +186,8 @@ When the run finishes, the transcript is saved and the backend logs the completi
 
 ## Generate AI Analysis For An Existing Transcript
 
+Full payload, output, storage, and testing docs are in [`docs/openai-meeting-analysis.md`](docs/openai-meeting-analysis.md).
+
 Run the OpenAI analysis on the latest saved transcript:
 
 ```bash

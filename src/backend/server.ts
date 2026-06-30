@@ -75,6 +75,15 @@ async function createMeetingAnalysisIfEnabled(transcript: MeetingTranscript) {
   }
 }
 
+async function finalizeTranscriptArtifacts(transcript: MeetingTranscript) {
+  const vttArtifact = await createLocalVttArtifact(transcript);
+
+  // Keep AI analysis after the VTT write/storage record succeeds.
+  const aiResult = await createMeetingAnalysisIfEnabled(transcript);
+
+  return { vttArtifact, aiResult };
+}
+
 // endpoint to start bot with given url
 app.post("/submit-link", async (req, res) => {
   const { url } = req.body;
@@ -134,8 +143,8 @@ app.post("/bot-done", async (req, res) => {
       console.warn(`Transcript not found for meeting ${meetingId}`);
       return res.status(202).send("Transcript not found yet");
     }
-    const vttArtifact = await createLocalVttArtifact(transcript);
-    const aiResult = await createMeetingAnalysisIfEnabled(transcript);
+    const { vttArtifact, aiResult } =
+      await finalizeTranscriptArtifacts(transcript);
 
     console.log("Bot completion payload:");
     console.dir(req.body, { depth: null });
@@ -171,15 +180,20 @@ app.post("/bot-failed", async (req, res) => {
   try {
     await updateMeetingStatus(jobId, "failed", meetingId);
     const job = await getMeetingJob(jobId);
-    let vttArtifact = null;
-    let aiResult = null;
+    let vttArtifact: Awaited<
+      ReturnType<typeof createLocalVttArtifact>
+    > | null = null;
+    let aiResult: Awaited<
+      ReturnType<typeof createMeetingAnalysisIfEnabled>
+    > | null = null;
 
     if (meetingId) {
       try {
         const transcript = await getTranscript(meetingId);
         if (transcript.segments.length > 0) {
-          vttArtifact = await createLocalVttArtifact(transcript);
-          aiResult = await createMeetingAnalysisIfEnabled(transcript);
+          const finalization = await finalizeTranscriptArtifacts(transcript);
+          vttArtifact = finalization.vttArtifact;
+          aiResult = finalization.aiResult;
         }
       } catch (artifactErr) {
         console.warn(
