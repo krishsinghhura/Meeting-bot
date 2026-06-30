@@ -70,6 +70,11 @@ TEAMS_AUTH_STATE_READONLY=0
 TEAMS_ADMISSION_TIMEOUT_MS=600000
 AUTH_BROWSER=chrome
 AUTH_BROWSER_PATH=
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-5.5
+OPENAI_REASONING_EFFORT=low
+OPENAI_VERBOSITY=low
+OPENAI_TRANSCRIPT_MAX_CHARS=60000
 ```
 
 Notes:
@@ -82,6 +87,8 @@ Notes:
 - `TEAMS_AUTH_STATE_HOST_PATH` can point to generated Microsoft Teams auth state. If it is empty, the backend uses `./teams-auth.json` when that file exists.
 - `TEAMS_AUTH_STATE_READONLY=0` lets the bot write refreshed Teams storage state back to `teams-auth.json` after Teams runs. Set it to `1` for a read-only mount.
 - `TEAMS_ADMISSION_TIMEOUT_MS` controls how long the Teams bot waits in the lobby after asking to join.
+- `OPENAI_API_KEY` enables structured meeting analysis after transcript/VTT finalization. If it is empty, the backend skips AI generation and still saves the transcript and VTT artifact.
+- `OPENAI_MODEL` defaults to `gpt-5.5`; set it to a pinned or lower-cost model when you are ready to optimize cost and latency.
 - Do not commit `.env`, `auth.json`, or `teams-auth.json`.
 
 ## Generate Google Auth State
@@ -175,7 +182,27 @@ The frontend posts the URL to `POST /submit-link`. The backend detects the provi
 
 For Google Meet, `auth.json` is mounted at `/app/auth.json` when available. For Microsoft Teams, `teams-auth.json` is mounted at `/app/teams-auth.json` when available. If the provider-specific auth file is missing, the bot falls back to guest web join. The target meeting still needs to allow or admit the bot account.
 
-When the run finishes, the transcript is saved and the backend logs the completion payload, job row, and transcript.
+When the run finishes, the transcript is saved and the backend logs the completion payload, job row, transcript, and VTT artifact. If `OPENAI_API_KEY` is configured, the backend also generates a structured meeting analysis and stores it in `MeetingAiResult`.
+
+## Generate AI Analysis For An Existing Transcript
+
+Run the OpenAI analysis on the latest saved transcript:
+
+```bash
+npm run summarize:meeting
+```
+
+Run it for one meeting:
+
+```bash
+npm run summarize:meeting -- ccbf8caf-5371-4bc7-9bd0-79b8fc224f36
+```
+
+Inspect the cleaned transcript that will be sent to OpenAI without making an API call:
+
+```bash
+npm run summarize:meeting -- ccbf8caf-5371-4bc7-9bd0-79b8fc224f36 --dry-run
+```
 
 ## Check Saved Data
 
@@ -206,14 +233,14 @@ WHERE  t."meetingId" = (
 GROUP  BY t."meetingId", t."createdAt";
 ```
 
-Latest summary row, if summary generation is added later:
+Latest AI analysis row:
 
 ```sql
 SELECT "meetingId",
        "generatedAt",
        "model",
-       "summaryText"
-FROM   "MeetingSummary"
+       "outputJson"
+FROM   "MeetingAiResult"
 ORDER  BY "generatedAt" DESC
 LIMIT  1;
 ```

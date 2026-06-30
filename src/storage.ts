@@ -1,5 +1,10 @@
 import { PrismaClient } from "@prisma/client";
-import { MeetingSummaryInput, MeetingTranscript, Segment } from "./models";
+import {
+  MeetingAiResultInput,
+  MeetingSummaryInput,
+  MeetingTranscript,
+  Segment,
+} from "./models";
 
 // init prisma client to access db
 const prisma = new PrismaClient();
@@ -105,6 +110,23 @@ export async function saveMeetingArtifact(input: {
       storagePath: input.storagePath,
       fileSizeBytes: input.fileSizeBytes,
       segmentCount: input.segmentCount,
+      generatedAt: input.generatedAt,
+    },
+    create: input,
+  });
+}
+
+export async function saveMeetingAiResult(input: MeetingAiResultInput) {
+  return await prisma.meetingAiResult.upsert({
+    where: {
+      meetingId_kind: {
+        meetingId: input.meetingId,
+        kind: input.kind,
+      },
+    },
+    update: {
+      model: input.model,
+      outputJson: input.outputJson,
       generatedAt: input.generatedAt,
     },
     create: input,

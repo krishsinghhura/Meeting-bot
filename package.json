@@ -22,7 +22,8 @@
     "auth:refresh": "node scripts/refresh-auth.js",
     "gen:teams-auth": "node scripts/generate-teams-auth.js",
     "teams-auth:refresh": "node scripts/refresh-teams-auth.js",
-    "export:vtt": "node scripts/export-vtt.js"
+    "export:vtt": "node scripts/export-vtt.js",
+    "summarize:meeting": "node scripts/summarize-meeting.js"
   },
   "devDependencies": {
     "@types/node": "^22.15.14",

@@ -5,11 +5,18 @@ import {
   createMeetingJob,
   getMeetingJob,
   getTranscript,
+  saveMeetingAiResult,
   updateMeetingStatus,
 } from "../storage";
 import { launchBotContainer } from "./launchBot";
 import { describeDatabaseUrl } from "./env";
 import { createLocalVttArtifact } from "./vtt";
+import {
+  analyzeMeetingTranscript,
+  getOpenAiModel,
+  isMeetingAnalysisEnabled,
+} from "../summarize";
+import type { MeetingTranscript } from "../models";
 
 const app = express();
 // turn on CORS for frontend at localhost:5173
@@ -45,12 +52,36 @@ function detectMeetingProvider(url: string) {
   return null;
 }
 
+async function createMeetingAnalysisIfEnabled(transcript: MeetingTranscript) {
+  if (!isMeetingAnalysisEnabled()) {
+    console.log(
+      `Skipping meeting analysis for ${transcript.meetingId}: OPENAI_API_KEY is not set`,
+    );
+    return null;
+  }
+
+  try {
+    console.log(
+      `Generating meeting analysis for ${transcript.meetingId} with ${getOpenAiModel()}`,
+    );
+    const analysis = await analyzeMeetingTranscript(transcript);
+    return await saveMeetingAiResult(analysis);
+  } catch (err) {
+    console.warn(
+      `Could not generate meeting analysis for ${transcript.meetingId}:`,
+      err,
+    );
+    return null;
+  }
+}
+
 // endpoint to start bot with given url
 app.post("/submit-link", async (req, res) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: "missing_url" });
   const provider = detectMeetingProvider(url);
-  if (!provider) return res.status(400).json({ error: "unsupported_meeting_link" });
+  if (!provider)
+    return res.status(400).json({ error: "unsupported_meeting_link" });
 
   try {
     const job = await createMeetingJob(url);
@@ -104,6 +135,7 @@ app.post("/bot-done", async (req, res) => {
       return res.status(202).send("Transcript not found yet");
     }
     const vttArtifact = await createLocalVttArtifact(transcript);
+    const aiResult = await createMeetingAnalysisIfEnabled(transcript);
 
     console.log("Bot completion payload:");
     console.dir(req.body, { depth: null });
@@ -113,12 +145,17 @@ app.post("/bot-done", async (req, res) => {
     console.dir(transcript, { depth: null });
     console.log("VTT artifact:");
     console.dir(vttArtifact, { depth: null });
+    if (aiResult) {
+      console.log("Meeting AI result:");
+      console.dir(aiResult, { depth: null });
+    }
 
     res.json({
       status: "transcript_saved",
       job,
       transcript,
       vttArtifact,
+      aiResult,
     });
   } catch (err) {
     console.error(`Error processing job ${jobId}:`, err);
@@ -135,16 +172,18 @@ app.post("/bot-failed", async (req, res) => {
     await updateMeetingStatus(jobId, "failed", meetingId);
     const job = await getMeetingJob(jobId);
     let vttArtifact = null;
+    let aiResult = null;
 
     if (meetingId) {
       try {
         const transcript = await getTranscript(meetingId);
         if (transcript.segments.length > 0) {
           vttArtifact = await createLocalVttArtifact(transcript);
+          aiResult = await createMeetingAnalysisIfEnabled(transcript);
         }
       } catch (artifactErr) {
         console.warn(
-          `Could not create VTT artifact for failed meeting ${meetingId}:`,
+          `Could not create post-run artifacts for failed meeting ${meetingId}:`,
           artifactErr,
         );
       }
@@ -158,12 +197,17 @@ app.post("/bot-failed", async (req, res) => {
       console.log("VTT artifact:");
       console.dir(vttArtifact, { depth: null });
     }
+    if (aiResult) {
+      console.log("Meeting AI result:");
+      console.dir(aiResult, { depth: null });
+    }
 
     res.json({
       status: "failed",
       job,
       error,
       vttArtifact,
+      aiResult,
     });
   } catch (err) {
     console.error(`Error marking job ${jobId} failed:`, err);

@@ -14,6 +14,7 @@ model MeetingTranscript {
     createdAt DateTime
     segments  Segment[]
     artifacts MeetingArtifact[]
+    aiResults MeetingAiResult[]
 }
 
 model MeetingSummary {
@@ -53,6 +54,21 @@ model MeetingArtifact {
   storagePath       String
   fileSizeBytes     Int
   segmentCount      Int
+  generatedAt       DateTime          @default(now())
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@unique([meetingId, kind])
+  @@index([meetingId])
+}
+
+model MeetingAiResult {
+  id                String            @id @default(uuid())
+  meetingId         String
+  meetingTranscript MeetingTranscript @relation(fields: [meetingId], references: [meetingId])
+  kind              String
+  model             String
+  outputJson        Json
   generatedAt       DateTime          @default(now())
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
