@@ -1,6 +1,6 @@
 /* scripts/export-vtt.js
- * Writes a local WebVTT transcript for one meeting and stores artifact details
- * in the database.
+ * Uploads a WebVTT transcript for one meeting and stores artifact details in
+ * the database.
  */
 
 require("dotenv").config();
@@ -11,7 +11,7 @@ require("ts-node").register({
 });
 
 const { PrismaClient } = require("@prisma/client");
-const { createLocalVttArtifact } = require("../src/backend/vtt");
+const { createVttArtifact } = require("../src/backend/vtt");
 
 const prisma = new PrismaClient();
 
@@ -34,7 +34,7 @@ async function main() {
     include: { segments: true },
   });
 
-  const artifact = await createLocalVttArtifact({
+  const artifact = await createVttArtifact({
     meetingId: transcript.meetingId,
     createdAt: transcript.createdAt,
     segments: transcript.segments,

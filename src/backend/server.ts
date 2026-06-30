@@ -10,7 +10,7 @@ import {
 } from "../storage";
 import { launchBotContainer } from "./launchBot";
 import { describeDatabaseUrl } from "./env";
-import { createLocalVttArtifact } from "./vtt";
+import { createVttArtifact } from "./vtt";
 import {
   analyzeMeetingTranscript,
   getOpenAiModel,
@@ -76,7 +76,7 @@ async function createMeetingAnalysisIfEnabled(transcript: MeetingTranscript) {
 }
 
 async function finalizeTranscriptArtifacts(transcript: MeetingTranscript) {
-  const vttArtifact = await createLocalVttArtifact(transcript);
+  const vttArtifact = await createVttArtifact(transcript);
 
   // Keep AI analysis after the VTT write/storage record succeeds.
   const aiResult = await createMeetingAnalysisIfEnabled(transcript);
@@ -181,7 +181,7 @@ app.post("/bot-failed", async (req, res) => {
     await updateMeetingStatus(jobId, "failed", meetingId);
     const job = await getMeetingJob(jobId);
     let vttArtifact: Awaited<
-      ReturnType<typeof createLocalVttArtifact>
+      ReturnType<typeof createVttArtifact>
     > | null = null;
     let aiResult: Awaited<
       ReturnType<typeof createMeetingAnalysisIfEnabled>

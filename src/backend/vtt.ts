@@ -1,36 +1,111 @@
-import { mkdir, stat, writeFile } from "fs/promises";
-import path from "path";
 import { MeetingTranscript, Segment } from "../models";
 import { saveMeetingArtifact } from "../storage";
+import { getRequiredEnv } from "./env";
 
 const VTT_KIND = "transcript_vtt";
 const VTT_MIME_TYPE = "text/vtt";
+const VTT_STORAGE_PREFIX = "vtt";
 
-export async function createLocalVttArtifact(transcript: MeetingTranscript) {
-  const outputDir = path.resolve(
-    process.env.LOCAL_ARTIFACTS_DIR || "local-artifacts",
-    "vtt",
-  );
-  await mkdir(outputDir, { recursive: true });
-
+export async function createVttArtifact(transcript: MeetingTranscript) {
   const segments = transcript.segments
     .filter((segment) => segment.text.trim())
     .sort((a, b) => a.start - b.start);
-  const storagePath = path.join(outputDir, `${transcript.meetingId}.vtt`);
+  const vtt = renderVtt(segments);
+  const fileSizeBytes = Buffer.byteLength(vtt, "utf8");
+  const storagePath = await uploadVttToSupabase(transcript.meetingId, vtt);
   const generatedAt = new Date();
 
-  await writeFile(storagePath, renderVtt(segments), "utf8");
-
-  const file = await stat(storagePath);
   return await saveMeetingArtifact({
     meetingId: transcript.meetingId,
     kind: VTT_KIND,
     mimeType: VTT_MIME_TYPE,
     storagePath,
-    fileSizeBytes: file.size,
+    fileSizeBytes,
     segmentCount: segments.length,
     generatedAt,
   });
+}
+
+async function uploadVttToSupabase(meetingId: string, vtt: string) {
+  const supabaseUrl = getRequiredEnv("SUPABASE_URL").replace(/\/+$/, "");
+  const supabaseSecretKey =
+    process.env.SUPABASE_SECRET_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    "";
+  if (!supabaseSecretKey) {
+    throw new Error(
+      "Missing required environment variable: SUPABASE_SECRET_KEY",
+    );
+  }
+
+  const bucket = getRequiredEnv("SUPABASE_STORAGE_BUCKET");
+  const objectPath = `${VTT_STORAGE_PREFIX}/${safeObjectName(meetingId)}.vtt`;
+  const uploadUrl = `${supabaseUrl}/storage/v1/object/${encodePath(bucket)}/${encodeObjectPath(objectPath)}`;
+
+  const response = await fetch(uploadUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${supabaseSecretKey}`,
+      apikey: supabaseSecretKey,
+      "Cache-Control": "max-age=3600",
+      "Content-Type": VTT_MIME_TYPE,
+      "x-upsert": "true",
+    },
+    body: Buffer.from(vtt, "utf8"),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `Supabase VTT upload failed (${response.status}): ${await readResponseMessage(response)}`,
+    );
+  }
+
+  return getStoredArtifactUrl(supabaseUrl, bucket, objectPath);
+}
+
+function getStoredArtifactUrl(
+  supabaseUrl: string,
+  bucket: string,
+  objectPath: string,
+) {
+  if (isPublicStorageBucket()) {
+    return `${supabaseUrl}/storage/v1/object/public/${encodePath(bucket)}/${encodeObjectPath(objectPath)}`;
+  }
+
+  return `supabase://${bucket}/${objectPath}`;
+}
+
+function isPublicStorageBucket() {
+  return ["1", "true", "yes", "public"].includes(
+    (process.env.SUPABASE_STORAGE_PUBLIC || "").trim().toLowerCase(),
+  );
+}
+
+function safeObjectName(value: string) {
+  return value.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+function encodeObjectPath(value: string) {
+  return value.split("/").map(encodePath).join("/");
+}
+
+function encodePath(value: string) {
+  return encodeURIComponent(value);
+}
+
+async function readResponseMessage(response: Response) {
+  const body = await response.text().catch(() => "");
+  if (!body) return response.statusText;
+
+  try {
+    const parsed = JSON.parse(body) as { message?: unknown; error?: unknown };
+    if (typeof parsed.message === "string") return parsed.message;
+    if (typeof parsed.error === "string") return parsed.error;
+  } catch {
+    // Fall through to raw response text.
+  }
+
+  return body;
 }
 
 export function renderVtt(segments: Segment[]) {

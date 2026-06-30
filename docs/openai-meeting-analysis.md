@@ -37,7 +37,7 @@ Bot finishes meeting
 -> POST /bot-done
 -> backend marks job as transcript_saved
 -> backend loads transcript segments
--> backend writes local VTT artifact
+-> backend uploads VTT artifact to Supabase Storage
 -> backend calls OpenAI if OPENAI_API_KEY is set
 -> backend stores JSON result in MeetingAiResult
 ```
@@ -47,7 +47,7 @@ Code path:
 ```text
 src/backend/server.ts
 POST /bot-done
-createLocalVttArtifact(...)
+createVttArtifact(...)
 createMeetingAnalysisIfEnabled(...)
 ```
 
@@ -60,7 +60,7 @@ Bot fails
 -> POST /bot-failed
 -> backend marks job as failed
 -> backend loads transcript segments
--> backend writes local VTT artifact if segments exist
+-> backend uploads VTT artifact to Supabase Storage if segments exist
 -> backend calls OpenAI if OPENAI_API_KEY is set
 -> backend stores JSON result in MeetingAiResult
 ```
@@ -75,6 +75,10 @@ OPENAI_MODEL=gpt-5.5
 OPENAI_REASONING_EFFORT=low
 OPENAI_VERBOSITY=low
 OPENAI_TRANSCRIPT_MAX_CHARS=60000
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_SECRET_KEY=sb_secret_your-server-secret
+SUPABASE_STORAGE_BUCKET=meeting-artifacts
+SUPABASE_STORAGE_PUBLIC=0
 ```
 
 | Variable                      | Required              | Default                     | Purpose                                                    |
@@ -86,6 +90,10 @@ OPENAI_TRANSCRIPT_MAX_CHARS=60000
 | `OPENAI_TRANSCRIPT_MAX_CHARS` | No                    | `60000`                     | Max cleaned transcript characters sent to OpenAI.          |
 | `OPENAI_BASE_URL`             | No                    | `https://api.openai.com/v1` | Optional override for compatible API base URLs.            |
 | `OPENAI_API_BASE_URL`         | No                    | `https://api.openai.com/v1` | Alternate base URL override.                               |
+| `SUPABASE_URL`                | Yes for VTT upload    | none                        | Supabase project URL used by the backend Storage upload.   |
+| `SUPABASE_SECRET_KEY`         | Yes for VTT upload    | none                        | Backend-only Supabase secret key for Storage writes.       |
+| `SUPABASE_STORAGE_BUCKET`     | Yes for VTT upload    | none                        | Bucket where VTT artifacts are uploaded.                   |
+| `SUPABASE_STORAGE_PUBLIC`     | No                    | `0`                         | Stores public URLs when set to `1`; otherwise stores `supabase://bucket/path`. |
 
 ## Input Data Source
 
@@ -472,7 +480,7 @@ When analysis is generated successfully, `/bot-done` includes `aiResult` in the 
     "meetingId": "ccbf8caf-5371-4bc7-9bd0-79b8fc224f36",
     "kind": "transcript_vtt",
     "mimeType": "text/vtt",
-    "storagePath": "/absolute/path/local-artifacts/vtt/ccbf8caf-5371-4bc7-9bd0-79b8fc224f36.vtt"
+    "storagePath": "supabase://meeting-artifacts/vtt/ccbf8caf-5371-4bc7-9bd0-79b8fc224f36.vtt"
   },
   "aiResult": {
     "meetingId": "ccbf8caf-5371-4bc7-9bd0-79b8fc224f36",

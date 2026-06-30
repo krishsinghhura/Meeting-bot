@@ -75,6 +75,10 @@ OPENAI_MODEL=gpt-5.5
 OPENAI_REASONING_EFFORT=low
 OPENAI_VERBOSITY=low
 OPENAI_TRANSCRIPT_MAX_CHARS=60000
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_SECRET_KEY=sb_secret_your-server-secret
+SUPABASE_STORAGE_BUCKET=meeting-artifacts
+SUPABASE_STORAGE_PUBLIC=0
 ```
 
 Notes:
@@ -89,6 +93,8 @@ Notes:
 - `TEAMS_ADMISSION_TIMEOUT_MS` controls how long the Teams bot waits in the lobby after asking to join.
 - `OPENAI_API_KEY` enables structured meeting analysis after transcript/VTT finalization. If it is empty, the backend skips AI generation and still saves the transcript and VTT artifact.
 - `OPENAI_MODEL` defaults to `gpt-5.5`; set it to a pinned or lower-cost model when you are ready to optimize cost and latency.
+- `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, and `SUPABASE_STORAGE_BUCKET` are required for VTT artifact uploads. `SUPABASE_SECRET_KEY` is backend-only and must not be exposed in browser code.
+- `SUPABASE_STORAGE_PUBLIC=0` stores a private object URL in `MeetingArtifact.storagePath`. Set it to `1` only if the bucket is public and you want `storagePath` to be a public URL.
 - Do not commit `.env`, `auth.json`, or `teams-auth.json`.
 
 ## Generate Google Auth State
@@ -182,7 +188,7 @@ The frontend posts the URL to `POST /submit-link`. The backend detects the provi
 
 For Google Meet, `auth.json` is mounted at `/app/auth.json` when available. For Microsoft Teams, `teams-auth.json` is mounted at `/app/teams-auth.json` when available. If the provider-specific auth file is missing, the bot falls back to guest web join. The target meeting still needs to allow or admit the bot account.
 
-When the run finishes, the transcript is saved and the backend logs the completion payload, job row, transcript, and VTT artifact. If `OPENAI_API_KEY` is configured, the backend also generates a structured meeting analysis and stores it in `MeetingAiResult`.
+When the run finishes, the transcript is saved and the backend uploads the VTT artifact to Supabase Storage before running AI analysis. If `OPENAI_API_KEY` is configured, the backend then generates a structured meeting analysis and stores it in `MeetingAiResult`.
 
 ## Generate AI Analysis For An Existing Transcript
 
