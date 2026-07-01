@@ -4,7 +4,10 @@ import cors from "cors";
 import {
   createMeetingJob,
   getMeetingJob,
+  getMeetingResultsForJob,
   getTranscript,
+  getUserMeetingJobByMeetingId,
+  listUserMeetingJobs,
   saveMeetingAiResult,
   updateMeetingStatus,
 } from "../storage";
@@ -17,6 +20,16 @@ import {
   isMeetingAnalysisEnabled,
 } from "../summarize";
 import type { MeetingTranscript } from "../models";
+import {
+  authenticateUser,
+  clearSession,
+  createSessionForUser,
+  getAuthenticatedUser,
+  registerUser,
+  validateEmail,
+  validatePassword,
+  type AuthenticatedUser,
+} from "./auth";
 
 const app = express();
 // turn on CORS for frontend at localhost:5173
@@ -25,6 +38,7 @@ app.use(
     origin: ["http://localhost:5173", "http://127.0.0.1:5173"],
     methods: ["POST", "GET", "OPTIONS"],
     allowedHeaders: ["Content-Type"],
+    credentials: true,
   }),
 );
 
@@ -50,6 +64,18 @@ function detectMeetingProvider(url: string) {
   }
 
   return null;
+}
+
+async function requireUser(
+  req: express.Request,
+  res: express.Response,
+): Promise<AuthenticatedUser | null> {
+  const user = await getAuthenticatedUser(req);
+  if (!user) {
+    res.status(401).json({ error: "unauthorized" });
+    return null;
+  }
+  return user;
 }
 
 async function createMeetingAnalysisIfEnabled(transcript: MeetingTranscript) {
@@ -84,8 +110,70 @@ async function finalizeTranscriptArtifacts(transcript: MeetingTranscript) {
   return { vttArtifact, aiResult };
 }
 
+app.post("/auth/register", async (req, res) => {
+  const { email, password } = req.body || {};
+  if (typeof email !== "string" || typeof password !== "string") {
+    return res.status(400).json({ error: "missing_fields" });
+  }
+  if (!validateEmail(email.trim().toLowerCase())) {
+    return res.status(400).json({ error: "invalid_email" });
+  }
+  if (!validatePassword(password)) {
+    return res.status(400).json({ error: "weak_password" });
+  }
+
+  try {
+    const user = await registerUser(email, password);
+    await createSessionForUser(res, user.id);
+    res.status(201).json({ user });
+  } catch (err) {
+    if (
+      err &&
+      typeof err === "object" &&
+      "code" in err &&
+      err.code === "P2002"
+    ) {
+      return res.status(409).json({ error: "email_already_registered" });
+    }
+    console.error("Registration failed:", err);
+    res.status(500).json({ error: "registration_failed" });
+  }
+});
+
+app.post("/auth/login", async (req, res) => {
+  const { email, password } = req.body || {};
+  if (typeof email !== "string" || typeof password !== "string") {
+    return res.status(400).json({ error: "missing_fields" });
+  }
+
+  try {
+    const user = await authenticateUser(email, password);
+    if (!user) {
+      return res.status(401).json({ error: "invalid_credentials" });
+    }
+    await createSessionForUser(res, user.id);
+    res.json({ user });
+  } catch (err) {
+    console.error("Login failed:", err);
+    res.status(500).json({ error: "login_failed" });
+  }
+});
+
+app.post("/auth/logout", async (req, res) => {
+  await clearSession(req, res);
+  res.json({ ok: true });
+});
+
+app.get("/auth/me", async (req, res) => {
+  const user = await getAuthenticatedUser(req);
+  res.json({ user });
+});
+
 // endpoint to start bot with given url
 app.post("/submit-link", async (req, res) => {
+  const user = await requireUser(req, res);
+  if (!user) return;
+
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: "missing_url" });
   const provider = detectMeetingProvider(url);
@@ -93,7 +181,7 @@ app.post("/submit-link", async (req, res) => {
     return res.status(400).json({ error: "unsupported_meeting_link" });
 
   try {
-    const job = await createMeetingJob(url);
+    const job = await createMeetingJob(url, user.id);
     const launch = await launchBotContainer(url, job.id, provider);
 
     res.status(202).json({
@@ -112,9 +200,33 @@ app.post("/submit-link", async (req, res) => {
   }
 });
 
+app.get("/jobs", async (req, res) => {
+  const user = await requireUser(req, res);
+  if (!user) return;
+
+  const jobs = await listUserMeetingJobs(user.id);
+  res.json({ jobs });
+});
+
+app.get("/jobs/:id", async (req, res) => {
+  const user = await requireUser(req, res);
+  if (!user) return;
+
+  const results = await getMeetingResultsForJob(user.id, req.params.id);
+  if (!results) return res.status(404).json({ error: "job_not_found" });
+
+  res.json(results);
+});
+
 // endpoint to fetch transcript for meeting
 app.get("/meeting-summary/:id", async (req, res) => {
+  const user = await requireUser(req, res);
+  if (!user) return;
+
   const meetingId = req.params.id;
+  const job = await getUserMeetingJobByMeetingId(user.id, meetingId);
+  if (!job) return res.status(404).send("Transcript not ready");
+
   const transcript = await getTranscript(meetingId);
 
   if (!transcript) return res.status(404).send("Transcript not ready");
@@ -180,9 +292,8 @@ app.post("/bot-failed", async (req, res) => {
   try {
     await updateMeetingStatus(jobId, "failed", meetingId);
     const job = await getMeetingJob(jobId);
-    let vttArtifact: Awaited<
-      ReturnType<typeof createVttArtifact>
-    > | null = null;
+    let vttArtifact: Awaited<ReturnType<typeof createVttArtifact>> | null =
+      null;
     let aiResult: Awaited<
       ReturnType<typeof createMeetingAnalysisIfEnabled>
     > | null = null;

@@ -17,6 +17,29 @@ model MeetingTranscript {
     aiResults MeetingAiResult[]
 }
 
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  passwordHash String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  sessions     UserSession[]
+  jobs         MeetingJob[]
+}
+
+model UserSession {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
 model MeetingSummary {
     id          String   @id @default(uuid())
     meetingId   String
@@ -38,11 +61,15 @@ model Segment {
 
 model MeetingJob {
   id          String   @id @default(uuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id])
   meetingUrl  String
   status      String   @default("pending")
   meetingId   String? 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+
+  @@index([userId])
 }
 
 model MeetingArtifact {

@@ -10,9 +10,9 @@ import {
 const prisma = new PrismaClient();
 
 // create job record for mtg
-export async function createMeetingJob(meetingUrl: string) {
+export async function createMeetingJob(meetingUrl: string, userId?: string) {
   return await prisma.meetingJob.create({
-    data: { meetingUrl },
+    data: { meetingUrl, userId },
   });
 }
 
@@ -20,6 +20,116 @@ export async function createMeetingJob(meetingUrl: string) {
 export async function getMeetingJob(id: string) {
   return await prisma.meetingJob.findUnique({
     where: { id },
+  });
+}
+
+export async function getUserMeetingJob(userId: string, id: string) {
+  return await prisma.meetingJob.findFirst({
+    where: { id, userId },
+  });
+}
+
+export async function getUserMeetingJobByMeetingId(
+  userId: string,
+  meetingId: string,
+) {
+  return await prisma.meetingJob.findFirst({
+    where: { meetingId, userId },
+  });
+}
+
+export async function listUserMeetingJobs(userId: string) {
+  return await prisma.meetingJob.findMany({
+    where: { userId },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+}
+
+export async function getMeetingResultsForJob(userId: string, jobId: string) {
+  const job = await prisma.meetingJob.findFirst({
+    where: { id: jobId, userId },
+  });
+  if (!job) return null;
+
+  if (!job.meetingId) {
+    return {
+      job,
+      transcript: null,
+      artifacts: [],
+      aiResults: [],
+    };
+  }
+
+  const transcript = await prisma.meetingTranscript.findUnique({
+    where: { meetingId: job.meetingId },
+    include: {
+      segments: {
+        orderBy: { start: "asc" },
+      },
+      artifacts: true,
+      aiResults: true,
+    },
+  });
+
+  return {
+    job,
+    transcript: transcript
+      ? {
+          meetingId: transcript.meetingId,
+          createdAt: transcript.createdAt,
+          segments: transcript.segments,
+        }
+      : null,
+    artifacts: transcript?.artifacts || [],
+    aiResults: transcript?.aiResults || [],
+  };
+}
+
+export async function createUser(email: string, passwordHash: string) {
+  return await prisma.user.create({
+    data: { email, passwordHash },
+    select: {
+      id: true,
+      email: true,
+      createdAt: true,
+    },
+  });
+}
+
+export async function findUserByEmail(email: string) {
+  return await prisma.user.findUnique({
+    where: { email },
+  });
+}
+
+export async function createUserSession(
+  userId: string,
+  tokenHash: string,
+  expiresAt: Date,
+) {
+  return await prisma.userSession.create({
+    data: { userId, tokenHash, expiresAt },
+  });
+}
+
+export async function findUserBySessionTokenHash(tokenHash: string) {
+  return await prisma.userSession.findUnique({
+    where: { tokenHash },
+    include: {
+      user: {
+        select: {
+          id: true,
+          email: true,
+        },
+      },
+    },
+  });
+}
+
+export async function deleteUserSession(tokenHash: string) {
+  await prisma.userSession.deleteMany({
+    where: { tokenHash },
   });
 }
 
@@ -139,13 +249,39 @@ export async function updateMeetingStatus(
   status: string,
   meetingId?: string,
 ) {
-  return await prisma.meetingJob.update({
-    where: { id },
-    data: {
-      status,
-      meetingId,
-    },
-  });
+  return await withPrismaRetry(() =>
+    prisma.meetingJob.update({
+      where: { id },
+      data: {
+        status,
+        meetingId,
+      },
+    }),
+  );
+}
+
+async function withPrismaRetry<T>(operation: () => Promise<T>, attempts = 3) {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (err) {
+      lastError = err;
+      const code =
+        err && typeof err === "object" && "code" in err
+          ? String(err.code)
+          : "";
+
+      if (code !== "P1001" || attempt === attempts) {
+        throw err;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+    }
+  }
+
+  throw lastError;
 }
 
 // save summary of mtg

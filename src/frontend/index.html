@@ -1,16 +1,99 @@
 <!doctype html>
 <html>
   <head>
-    <title>Meeting Bot Joiner</title>
+    <title>Meeting Bot</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <h1>Submit a link to your Google Meet</h1>
-    <form id="meeting-form">
-      <input type="text" id="url" placeholder="Insert your link here" />
-      <button type="submit">Submit</button>
-    </form>
-    <div id="status"></div>
+    <main class="app-shell">
+      <section id="auth-view" class="auth-layout" hidden>
+        <div>
+          <h1>Meeting Bot</h1>
+          <p class="muted">
+            Sign in to submit meeting links and see only your own transcripts,
+            VTT artifacts, and AI summaries.
+          </p>
+        </div>
+
+        <form id="auth-form" class="panel">
+          <div class="tabs" role="tablist" aria-label="Authentication mode">
+            <button type="button" id="login-tab" class="tab active">
+              Login
+            </button>
+            <button type="button" id="register-tab" class="tab">
+              Register
+            </button>
+          </div>
+
+          <label>
+            Email
+            <input type="email" id="email" autocomplete="email" required />
+          </label>
+
+          <label>
+            Password
+            <input
+              type="password"
+              id="password"
+              autocomplete="current-password"
+              minlength="8"
+              required
+            />
+          </label>
+
+          <button type="submit" id="auth-submit">Login</button>
+          <div id="auth-status" class="status"></div>
+        </form>
+      </section>
+
+      <section id="dashboard-view" hidden>
+        <header class="topbar">
+          <div>
+            <h1>Meeting Dashboard</h1>
+            <p id="current-user" class="muted"></p>
+          </div>
+          <button type="button" id="logout-button" class="secondary">
+            Logout
+          </button>
+        </header>
+
+        <section class="panel submit-panel">
+          <form id="meeting-form">
+            <label>
+              Meeting link
+              <input
+                type="url"
+                id="url"
+                placeholder="https://meet.google.com/abc-defg-hij"
+                required
+              />
+            </label>
+            <button type="submit">Start Bot</button>
+          </form>
+          <div id="status" class="status"></div>
+        </section>
+
+        <section class="dashboard-grid">
+          <section class="panel">
+            <div class="section-header">
+              <h2>Meetings</h2>
+              <button type="button" id="refresh-jobs" class="secondary">
+                Refresh
+              </button>
+            </div>
+            <div id="jobs-list" class="jobs-list"></div>
+          </section>
+
+          <section class="panel">
+            <h2>Results</h2>
+            <div id="result-detail" class="result-detail muted">
+              Select a meeting to see transcript and AI results.
+            </div>
+          </section>
+        </section>
+      </section>
+    </main>
+
     <script type="module" src="main.ts"></script>
   </body>
 </html>

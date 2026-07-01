@@ -505,20 +505,26 @@ async function enableTeamsCaptions(page: Page) {
     return;
   }
 
+  if (await clickTeamsCaptionsControl(page)) {
+    await waitForTeamsCaptions(page);
+    return;
+  }
+
   const moreButton = page.locator('button[id="callingButtons-showMoreBtn"]').first();
   await moreButton.waitFor({ state: "visible", timeout: 120_000 });
   await clickLocator(moreButton, 'Teams "More" button');
   console.log('[teams] clicked "More"');
 
-  const captionsButton = page.locator('div[id="closed-captions-button"]').first();
-  await captionsButton.waitFor({ state: "visible", timeout: 120_000 });
-  await clickLocator(captionsButton, 'Teams "Captions" button');
-  console.log('[teams] clicked "Captions"');
+  if (!(await clickTeamsCaptionsMenuItem(page))) {
+    const state = await getTeamsPageState(page);
+    throw new Error(
+      `Teams captions control was not available after opening More. url=${state.url}; buttons=${JSON.stringify(
+        state.buttons,
+      )}; page=${state.bodyText}`,
+    );
+  }
 
-  await page
-    .locator(TEAMS_CAPTIONS_CONTAINER_SEL)
-    .first()
-    .waitFor({ state: "visible", timeout: 120_000 });
+  await waitForTeamsCaptions(page);
 }
 
 async function isTeamsCaptionsVisible(page: Page, timeoutMs = 1000): Promise<boolean> {
@@ -527,6 +533,82 @@ async function isTeamsCaptionsVisible(page: Page, timeoutMs = 1000): Promise<boo
     .first()
     .isVisible({ timeout: timeoutMs })
     .catch(() => false);
+}
+
+async function waitForTeamsCaptions(page: Page) {
+  await page
+    .locator(TEAMS_CAPTIONS_CONTAINER_SEL)
+    .first()
+    .waitFor({ state: "visible", timeout: 120_000 });
+}
+
+async function clickTeamsCaptionsControl(page: Page): Promise<boolean> {
+  const controls = [
+    page.locator('div[id="closed-captions-button"]').first(),
+    page.locator('button[id="closed-captions-button"]').first(),
+    page.locator('[data-tid*="closed-caption"]').first(),
+    page.getByRole("button", { name: /captions|transcription/i }).first(),
+    page.getByText(/^captions$/i).first(),
+  ];
+
+  for (const control of controls) {
+    if (await clickLocatorIfVisible(control, 'Teams "Captions" control', 1500)) {
+      console.log('[teams] clicked "Captions"');
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function clickTeamsCaptionsMenuItem(page: Page): Promise<boolean> {
+  if (await clickTeamsCaptionsControl(page)) {
+    return true;
+  }
+
+  const directItems = [
+    page.getByRole("menuitem", { name: /turn on live captions|turn on captions|live captions|captions/i }).first(),
+    page.locator('[role="menuitem"]:has-text("Turn on live captions")').first(),
+    page.locator('[role="menuitem"]:has-text("Turn on captions")').first(),
+    page.locator('[role="menuitem"]:has-text("Captions")').first(),
+    page.locator('div[id="closed-captions-button"]').first(),
+  ];
+
+  for (const item of directItems) {
+    if (await clickLocatorIfVisible(item, "Teams captions menu item", 3000)) {
+      console.log("[teams] selected captions menu item");
+      return true;
+    }
+  }
+
+  const submenus = [
+    page.getByRole("menuitem", { name: /language and speech/i }).first(),
+    page.getByRole("menuitem", { name: /language/i }).first(),
+    page.locator('[role="menuitem"]:has-text("Language and speech")').first(),
+    page.locator('[role="menuitem"]:has-text("Language")').first(),
+  ];
+
+  for (const submenu of submenus) {
+    if (!(await clickLocatorIfVisible(submenu, 'Teams "Language and speech" menu item', 2000))) {
+      continue;
+    }
+
+    await page.waitForTimeout(700);
+    if (await clickTeamsCaptionsControl(page)) {
+      return true;
+    }
+
+    for (const item of directItems) {
+      if (await clickLocatorIfVisible(item, "Teams captions submenu item", 3000)) {
+        console.log("[teams] selected captions submenu item");
+        return true;
+      }
+    }
+
+    await page.keyboard.press("Escape").catch(() => undefined);
+  }
+
+  return false;
 }
 
 async function scrapeTeamsCaptions(
@@ -1102,6 +1184,20 @@ async function clickIfVisible(page: Page, selector: string, timeout = 5000) {
     const elem = page.locator(selector);
     await elem.waitFor({ state: "visible", timeout });
     await clickLocator(elem, selector);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function clickLocatorIfVisible(
+  locator: Locator,
+  label: string,
+  timeout = 3000,
+) {
+  try {
+    await locator.waitFor({ state: "visible", timeout });
+    await clickLocator(locator, label);
     return true;
   } catch {
     return false;
