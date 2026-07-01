@@ -25,10 +25,6 @@ export async function launchBotContainer(
     provider === "google_meet" ? getAuthStateHostPath() : getTeamsAuthStateHostPath();
   const authStateContainerPath =
     provider === "google_meet" ? "/app/auth.json" : "/app/teams-auth.json";
-  const readOnlyAuth =
-    provider === "google_meet"
-      ? process.env.AUTH_STATE_READONLY === "1"
-      : process.env.TEAMS_AUTH_STATE_READONLY === "1";
 
   const env = [
     `MEETING_URL=${meetingUrl}`,
@@ -46,8 +42,7 @@ export async function launchBotContainer(
         ? `AUTH_STATE_PATH=${authStateContainerPath}`
         : `TEAMS_AUTH_STATE_PATH=${authStateContainerPath}`,
     );
-    env.push(`AUTH_STATE_WRITE_BACK=${readOnlyAuth ? "0" : "1"}`);
-    binds.push(`${authStateHostPath}:${authStateContainerPath}:${readOnlyAuth ? "ro" : "rw"}`);
+    binds.push(`${authStateHostPath}:${authStateContainerPath}:ro`);
   }
   const botNetwork = getBotNetwork();
 
@@ -76,7 +71,7 @@ export async function launchBotContainer(
   console.log(`Started bot container: ${containerName}`);
   if (authStateHostPath) {
     console.log(
-      `[auth] Mounted Playwright storage state from ${authStateHostPath} (${readOnlyAuth ? "read-only" : "read-write"})`,
+      `[auth] Mounted Playwright storage state from ${authStateHostPath} (read-only)`,
     );
   } else if (provider === "google_meet") {
     console.warn("[auth] No auth.json found or AUTH_STATE_HOST_PATH configured; bot will run without signed-in storage state");

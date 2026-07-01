@@ -64,9 +64,7 @@ BOT_NETWORK=
 GOOGLE_ACCOUNT_USER=your-bot-google-email
 GOOGLE_ACCOUNT_PASSWORD=your-bot-google-password
 AUTH_STATE_HOST_PATH=/absolute/path/to/meeting-bot/auth.json
-AUTH_STATE_READONLY=0
 TEAMS_AUTH_STATE_HOST_PATH=/absolute/path/to/meeting-bot/teams-auth.json
-TEAMS_AUTH_STATE_READONLY=0
 TEAMS_ADMISSION_TIMEOUT_MS=600000
 AUTH_BROWSER=chrome
 AUTH_BROWSER_PATH=
@@ -88,9 +86,8 @@ Notes:
 - `BOT_DATABASE_URL` is optional. If empty, the bot uses `DATABASE_URL`.
 - `BACKEND_CALLBACK_URL` is the URL bot containers use to call the backend on your host machine.
 - `AUTH_STATE_HOST_PATH` can point to the generated `auth.json` file. If it is empty, the backend uses `./auth.json` when that file exists.
-- `AUTH_STATE_READONLY=0` lets the bot write refreshed Playwright storage state back to `auth.json` after runs. Set it to `1` for a read-only mount.
 - `TEAMS_AUTH_STATE_HOST_PATH` can point to generated Microsoft Teams auth state. If it is empty, the backend uses `./teams-auth.json` when that file exists.
-- `TEAMS_AUTH_STATE_READONLY=0` lets the bot write refreshed Teams storage state back to `teams-auth.json` after Teams runs. Set it to `1` for a read-only mount.
+- Auth state files are mounted read-only into bot containers. Normal bot runs never rewrite `auth.json` or `teams-auth.json`.
 - `TEAMS_ADMISSION_TIMEOUT_MS` controls how long the Teams bot waits in the lobby after asking to join.
 - `AUTH_COOKIE_SECURE=0` is correct for local `http://localhost` development. Set it to `1` when serving the app over HTTPS.
 - `OPENAI_API_KEY` enables structured meeting analysis after transcript/VTT finalization. If it is empty, the backend skips AI generation and still saves the transcript and VTT artifact.
@@ -109,13 +106,7 @@ npm run gen:auth
 
 This opens a browser session for the bot account and writes the saved auth state to `auth.json`.
 
-Refresh a still-valid saved session without doing a full login:
-
-```bash
-npm run auth:refresh
-```
-
-This opens Google Meet with the current `auth.json`, verifies that it reaches Meet as a signed-in account, and rewrites the storage state. It cannot bypass a Google sign-in, 2FA, recovery, or device challenge. If refresh reports that Google redirected to sign-in, run `npm run gen:auth` again.
+If the saved Google session expires or starts landing on sign-in/challenge pages, run `npm run gen:auth` again and replace `auth.json` with the newly generated known-good state.
 
 Generate the signed-in Microsoft Teams browser state used by Teams bot runs:
 
@@ -124,12 +115,6 @@ npm run gen:teams-auth
 ```
 
 This opens a browser session for the Microsoft account. Complete sign-in and wait until Teams itself is loaded before pressing Enter. The script writes `teams-auth.json`.
-
-Refresh a still-valid saved Teams session:
-
-```bash
-npm run teams-auth:refresh
-```
 
 Teams auth is separate from Google auth. `auth.json` is only for Google Meet; `teams-auth.json` is only for Microsoft Teams.
 

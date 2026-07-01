@@ -1,4 +1,4 @@
-import { BrowserContext, chromium, Locator, Page } from "playwright";
+import { chromium, Locator, Page } from "playwright";
 import { existsSync } from "fs";
 import { saveTranscriptBatch } from "../storage";
 import { v4 as uuidv4 } from "uuid";
@@ -86,9 +86,8 @@ export async function runBot(url: string): Promise<string> {
     contextOptions.userAgent =
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
   }
-  const context: BrowserContext = await browser.newContext(contextOptions);
+  const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
-  let canPersistAuthState = false;
 
   // for debugging so that you see all console lines in terminal
   page.on("console", (msg) => console.log(`[page:${msg.type()}]`, msg.text()));
@@ -98,12 +97,10 @@ export async function runBot(url: string): Promise<string> {
     if (provider === "google_meet") {
       if (shouldUseAuthState) {
         await logGoogleAuthState(page);
-        canPersistAuthState = true;
       }
       return await runGoogleMeetBot(page, url, meetingId, createdAt);
     }
 
-    canPersistAuthState = shouldUseAuthState;
     return await runMicrosoftTeamsBot(
       page,
       url,
@@ -115,7 +112,6 @@ export async function runBot(url: string): Promise<string> {
     await notifyBackendFailure(meetingId, err);
     throw new Error(`Run Bot error: ${err}`);
   } finally {
-    await persistAuthState(context, authStatePath, canPersistAuthState);
     await browser.close().catch(() => undefined);
   }
 }
@@ -174,24 +170,6 @@ async function runGoogleMeetBot(
   console.log("done scraping. Returning meetingId.");
 
   return mid;
-}
-
-async function persistAuthState(
-  context: BrowserContext,
-  authStatePath: string,
-  hasAuthState: boolean,
-) {
-  if (!hasAuthState || process.env.AUTH_STATE_WRITE_BACK === "0") {
-    return;
-  }
-
-  try {
-    await context.storageState({ path: authStatePath });
-    console.log(`[auth] Refreshed storage state at ${authStatePath}`);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[auth] Could not refresh storage state at ${authStatePath}: ${message}`);
-  }
 }
 
 async function notifyBackendFailure(meetingId: string, err: unknown) {
