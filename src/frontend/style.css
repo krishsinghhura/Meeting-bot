@@ -128,6 +128,70 @@ p {
   margin-bottom: 20px;
 }
 
+.analytics-panel {
+  margin-bottom: 20px;
+}
+
+.analytics-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.metric {
+  min-height: 86px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 14px;
+  background: #f8fbfd;
+}
+
+.metric strong {
+  display: block;
+  color: #0f172a;
+  font-size: 26px;
+  line-height: 1.2;
+}
+
+.metric span {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.speaker-panel {
+  margin-top: 18px;
+}
+
+.speaker-panel h3 {
+  font-size: 16px;
+}
+
+.speaker-participation {
+  display: grid;
+  gap: 10px;
+}
+
+.speaker-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 180px) minmax(0, 1fr) 72px;
+  gap: 12px;
+  align-items: center;
+}
+
+.speaker-bar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.speaker-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: #1264a3;
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: 380px minmax(0, 1fr);
@@ -211,10 +275,19 @@ p {
     grid-template-columns: 1fr;
   }
 
+  .analytics-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .topbar,
   .section-header,
   #meeting-form {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .speaker-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
   }
 }

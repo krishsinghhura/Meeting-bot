@@ -6,6 +6,7 @@ import {
   getMeetingJob,
   getMeetingResultsForJob,
   getTranscript,
+  getUserAnalytics,
   getUserMeetingJobByMeetingId,
   listUserMeetingJobs,
   saveMeetingAiResult,
@@ -18,6 +19,7 @@ import {
   analyzeMeetingTranscript,
   getOpenAiModel,
   isMeetingAnalysisEnabled,
+  renderCleanTranscript,
 } from "../summarize";
 import type { MeetingTranscript } from "../models";
 import {
@@ -86,9 +88,17 @@ async function createMeetingAnalysisIfEnabled(transcript: MeetingTranscript) {
     return null;
   }
 
+  const transcriptLength = renderCleanTranscript(transcript).trim().length;
+  if (transcriptLength === 0) {
+    console.log(
+      `Skipping meeting analysis for ${transcript.meetingId}: transcript is empty`,
+    );
+    return null;
+  }
+
   try {
     console.log(
-      `Generating meeting analysis for ${transcript.meetingId} with ${getOpenAiModel()}`,
+      `Generating meeting analysis for ${transcript.meetingId} with ${getOpenAiModel()} (${transcriptLength} transcript chars)`,
     );
     const analysis = await analyzeMeetingTranscript(transcript);
     return await saveMeetingAiResult(analysis);
@@ -206,6 +216,14 @@ app.get("/jobs", async (req, res) => {
 
   const jobs = await listUserMeetingJobs(user.id);
   res.json({ jobs });
+});
+
+app.get("/analytics", async (req, res) => {
+  const user = await requireUser(req, res);
+  if (!user) return;
+
+  const analytics = await getUserAnalytics(user.id);
+  res.json({ analytics });
 });
 
 app.get("/jobs/:id", async (req, res) => {

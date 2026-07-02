@@ -86,6 +86,107 @@ export async function getMeetingResultsForJob(userId: string, jobId: string) {
   };
 }
 
+export async function getUserAnalytics(userId: string) {
+  const jobs = await prisma.meetingJob.findMany({
+    where: { userId },
+    select: {
+      id: true,
+      status: true,
+      meetingId: true,
+    },
+  });
+  const meetingIds = jobs
+    .map((job) => job.meetingId)
+    .filter((meetingId): meetingId is string => Boolean(meetingId));
+
+  if (meetingIds.length === 0) {
+    return emptyAnalytics(jobs.length);
+  }
+
+  const transcripts = await prisma.meetingTranscript.findMany({
+    where: {
+      meetingId: { in: meetingIds },
+    },
+    include: {
+      segments: {
+        orderBy: { start: "asc" },
+      },
+      aiResults: {
+        where: { kind: "meeting_analysis" },
+      },
+    },
+  });
+
+  let minutesCaptured = 0;
+  let aiCreditsUsed = 0;
+  let actionItemCount = 0;
+  const speakerSeconds = new Map<string, number>();
+
+  for (const transcript of transcripts) {
+    const segments = transcript.segments.filter((segment) =>
+      segment.text.trim(),
+    );
+    const transcriptStart = Math.min(
+      ...segments.map((segment) => Math.max(0, segment.start)),
+    );
+    const transcriptEnd = Math.max(
+      ...segments.map((segment) => Math.max(segment.start, segment.end)),
+    );
+
+    if (
+      segments.length > 0 &&
+      Number.isFinite(transcriptStart) &&
+      Number.isFinite(transcriptEnd)
+    ) {
+      minutesCaptured += Math.max(0, transcriptEnd - transcriptStart) / 60;
+    }
+
+    for (const segment of segments) {
+      const speaker = segment.speaker.trim() || "Unknown Speaker";
+      const seconds = Math.max(0, segment.end - segment.start);
+      speakerSeconds.set(speaker, (speakerSeconds.get(speaker) || 0) + seconds);
+    }
+
+    for (const result of transcript.aiResults) {
+      aiCreditsUsed += 1;
+      actionItemCount += countActionItems(result.outputJson);
+    }
+  }
+
+  return {
+    meetingCount: jobs.length,
+    completedMeetingCount: jobs.filter((job) => job.status === "transcript_saved")
+      .length,
+    minutesCaptured: Math.round(minutesCaptured),
+    aiCreditsUsed,
+    actionItemCount,
+    speakerParticipation: [...speakerSeconds.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([speaker, seconds]) => ({
+        speaker,
+        seconds: Math.round(seconds),
+        minutes: Math.round((seconds / 60) * 10) / 10,
+      })),
+  };
+}
+
+function emptyAnalytics(meetingCount = 0) {
+  return {
+    meetingCount,
+    completedMeetingCount: 0,
+    minutesCaptured: 0,
+    aiCreditsUsed: 0,
+    actionItemCount: 0,
+    speakerParticipation: [],
+  };
+}
+
+function countActionItems(outputJson: unknown) {
+  if (!outputJson || typeof outputJson !== "object") return 0;
+  const analysis = outputJson as { actionItems?: unknown };
+  return Array.isArray(analysis.actionItems) ? analysis.actionItems.length : 0;
+}
+
 export async function createUser(email: string, passwordHash: string) {
   return await prisma.user.create({
     data: { email, passwordHash },

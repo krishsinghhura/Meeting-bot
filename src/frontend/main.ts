@@ -54,6 +54,19 @@ type MeetingResults = {
   }[];
 };
 
+type Analytics = {
+  meetingCount: number;
+  completedMeetingCount: number;
+  minutesCaptured: number;
+  aiCreditsUsed: number;
+  actionItemCount: number;
+  speakerParticipation: {
+    speaker: string;
+    seconds: number;
+    minutes: number;
+  }[];
+};
+
 let authMode: "login" | "register" = "login";
 let currentUser: User | null = null;
 
@@ -75,6 +88,15 @@ const currentUserElem = document.getElementById("current-user") as HTMLElement;
 const meetingForm = document.getElementById("meeting-form") as HTMLFormElement;
 const urlInput = document.getElementById("url") as HTMLInputElement;
 const statusElem = document.getElementById("status") as HTMLElement;
+const analyticsStatus = document.getElementById(
+  "analytics-status",
+) as HTMLElement;
+const analyticsSummary = document.getElementById(
+  "analytics-summary",
+) as HTMLElement;
+const speakerParticipation = document.getElementById(
+  "speaker-participation",
+) as HTMLElement;
 const jobsList = document.getElementById("jobs-list") as HTMLElement;
 const refreshJobsButton = document.getElementById(
   "refresh-jobs",
@@ -83,7 +105,7 @@ const resultDetail = document.getElementById("result-detail") as HTMLElement;
 
 loginTab.addEventListener("click", () => setAuthMode("login"));
 registerTab.addEventListener("click", () => setAuthMode("register"));
-refreshJobsButton.addEventListener("click", () => loadJobs());
+refreshJobsButton.addEventListener("click", () => refreshDashboard());
 
 authForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -127,6 +149,7 @@ meetingForm.addEventListener("submit", async (event) => {
     });
     statusElem.textContent = `${payload.message}. Job ${payload.jobId}. Auth: ${payload.authMode}.`;
     urlInput.value = "";
+    await loadAnalytics();
     await loadJobs();
   } catch (err) {
     statusElem.textContent = getErrorMessage(err);
@@ -145,7 +168,7 @@ async function boot() {
 
   if (currentUser) {
     showDashboard();
-    await loadJobs();
+    await refreshDashboard();
   } else {
     showAuth();
   }
@@ -182,6 +205,70 @@ async function loadJobs() {
   } catch (err) {
     jobsList.textContent = getErrorMessage(err);
   }
+}
+
+async function refreshDashboard() {
+  await Promise.all([loadAnalytics(), loadJobs()]);
+}
+
+async function loadAnalytics() {
+  analyticsStatus.textContent = "Loading...";
+  try {
+    const payload = await api<{ analytics: Analytics }>("/analytics");
+    renderAnalytics(payload.analytics);
+    analyticsStatus.textContent = "";
+  } catch (err) {
+    analyticsStatus.textContent = getErrorMessage(err);
+    analyticsSummary.innerHTML = "";
+    speakerParticipation.innerHTML = "";
+  }
+}
+
+function renderAnalytics(analytics: Analytics) {
+  analyticsSummary.innerHTML = [
+    metric("Meetings", analytics.meetingCount),
+    metric("Completed", analytics.completedMeetingCount),
+    metric("Minutes", analytics.minutesCaptured),
+    metric("AI Credits", analytics.aiCreditsUsed),
+    metric("Action Items", analytics.actionItemCount),
+  ].join("");
+
+  renderSpeakerParticipation(analytics.speakerParticipation);
+}
+
+function metric(label: string, value: number) {
+  return `
+    <div class="metric">
+      <strong>${escapeHtml(String(value))}</strong>
+      <span>${escapeHtml(label)}</span>
+    </div>
+  `;
+}
+
+function renderSpeakerParticipation(
+  speakers: Analytics["speakerParticipation"],
+) {
+  if (speakers.length === 0) {
+    speakerParticipation.innerHTML = `<p class="muted">No speaker data yet.</p>`;
+    return;
+  }
+
+  const maxSeconds = Math.max(...speakers.map((speaker) => speaker.seconds), 1);
+  speakerParticipation.innerHTML = speakers
+    .slice(0, 8)
+    .map((speaker) => {
+      const width = Math.max(4, Math.round((speaker.seconds / maxSeconds) * 100));
+      return `
+        <div class="speaker-row">
+          <strong>${escapeHtml(speaker.speaker)}</strong>
+          <div class="speaker-bar" aria-hidden="true">
+            <div class="speaker-fill" style="width: ${width}%"></div>
+          </div>
+          <span class="muted">${escapeHtml(formatMinutes(speaker.minutes))}</span>
+        </div>
+      `;
+    })
+    .join("");
 }
 
 function renderJobs(jobs: MeetingJob[]) {
@@ -363,6 +450,12 @@ function shortMeetingUrl(value: string) {
   } catch {
     return value;
   }
+}
+
+function formatMinutes(value: number) {
+  return `${value.toLocaleString(undefined, {
+    maximumFractionDigits: 1,
+  })} min`;
 }
 
 function escapeHtml(value: string) {
