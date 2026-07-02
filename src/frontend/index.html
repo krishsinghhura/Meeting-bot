@@ -2,6 +2,12 @@
 <html>
   <head>
     <title>Meeting Bot</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&family=Inter+Tight:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
@@ -100,6 +106,25 @@
             <h2>Results</h2>
             <div id="result-detail" class="result-detail muted">
               Select a meeting to see transcript and AI results.
+            </div>
+          </section>
+
+          <section class="panel chat-panel-container">
+            <h2>Ask Meeting Bot</h2>
+            <div id="chat-detail-empty" class="result-detail muted">
+              Select a meeting to start chatting.
+            </div>
+            <div id="chat-container" class="chat-container" hidden>
+              <div id="chat-log" class="chat-log"></div>
+              <form id="chat-form" class="chat-form">
+                <input
+                  type="text"
+                  id="chat-input"
+                  placeholder="Ask a question about this meeting..."
+                  required
+                />
+                <button type="submit" id="chat-submit">Send</button>
+              </form>
             </div>
           </section>
         </section>

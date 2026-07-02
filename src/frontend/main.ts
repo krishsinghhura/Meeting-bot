@@ -103,6 +103,24 @@ const refreshJobsButton = document.getElementById(
 ) as HTMLButtonElement;
 const resultDetail = document.getElementById("result-detail") as HTMLElement;
 
+// Chat UI DOM Elements
+const chatContainer = document.getElementById("chat-container") as HTMLElement;
+const chatDetailEmpty = document.getElementById("chat-detail-empty") as HTMLElement;
+const chatForm = document.getElementById("chat-form") as HTMLFormElement;
+const chatInput = document.getElementById("chat-input") as HTMLInputElement;
+const chatSubmit = document.getElementById("chat-submit") as HTMLButtonElement;
+const chatLog = document.getElementById("chat-log") as HTMLElement;
+
+let selectedJobId: string | null = null;
+
+type ChatMessage = {
+  sender: "user" | "bot";
+  text: string;
+  citations?: Array<{ start: number; end: number; speaker: string; text: string }>;
+};
+
+const chatHistories = new Map<string, ChatMessage[]>();
+
 loginTab.addEventListener("click", () => setAuthMode("login"));
 registerTab.addEventListener("click", () => setAuthMode("register"));
 refreshJobsButton.addEventListener("click", () => refreshDashboard());
@@ -298,11 +316,29 @@ async function loadJobResult(jobId: string) {
   resultDetail.className = "result-detail";
   resultDetail.textContent = "Loading results...";
 
+  selectedJobId = jobId;
+  chatContainer.hidden = true;
+  chatDetailEmpty.hidden = false;
+  chatDetailEmpty.textContent = "Loading chat...";
+
   try {
     const results = await api<MeetingResults>(`/jobs/${jobId}`);
     renderResults(results);
+
+    if (results.job.status === "transcript_saved" && results.transcript) {
+      chatDetailEmpty.hidden = true;
+      chatContainer.hidden = false;
+      renderChatLog(jobId);
+    } else {
+      chatContainer.hidden = true;
+      chatDetailEmpty.hidden = false;
+      chatDetailEmpty.textContent = "Transcript not ready.";
+    }
   } catch (err) {
     resultDetail.textContent = getErrorMessage(err);
+    chatContainer.hidden = true;
+    chatDetailEmpty.hidden = false;
+    chatDetailEmpty.textContent = "Select a meeting to start chatting.";
   }
 }
 
@@ -470,3 +506,114 @@ function escapeHtml(value: string) {
 function escapeAttribute(value: string) {
   return escapeHtml(value);
 }
+
+// Chat UI Helper Functions & Event Listeners
+function renderChatLog(jobId: string) {
+  chatLog.innerHTML = "";
+  const history = chatHistories.get(jobId) || [];
+  for (const message of history) {
+    appendMessageToDOM(message);
+  }
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+function appendMessageToDOM(message: ChatMessage) {
+  const messageDiv = document.createElement("div");
+  messageDiv.className = `chat-message ${message.sender}`;
+  
+  const textDiv = document.createElement("div");
+  textDiv.className = "message-text";
+  textDiv.textContent = message.text;
+  messageDiv.appendChild(textDiv);
+
+  if (message.citations && message.citations.length > 0) {
+    const citationsDiv = document.createElement("div");
+    citationsDiv.className = "citations-container";
+    
+    const citationsTitle = document.createElement("small");
+    citationsTitle.className = "citations-title muted";
+    citationsTitle.textContent = "Citations:";
+    citationsDiv.appendChild(citationsTitle);
+
+    const chipsWrapper = document.createElement("div");
+    chipsWrapper.className = "citation-chips";
+
+    for (const citation of message.citations) {
+      const chip = document.createElement("span");
+      chip.className = "citation-chip";
+      chip.title = `[${citation.speaker}]: "${citation.text}"`;
+      chip.textContent = `${citation.speaker} [${formatTime(citation.start)}-${formatTime(citation.end)}]`;
+      chipsWrapper.appendChild(chip);
+    }
+    citationsDiv.appendChild(chipsWrapper);
+    messageDiv.appendChild(citationsDiv);
+  }
+
+  chatLog.appendChild(messageDiv);
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
+function formatTime(totalSeconds: number) {
+  const seconds = Math.max(0, Math.floor(totalSeconds));
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+}
+
+chatForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const jobId = selectedJobId;
+  if (!jobId) return;
+
+  const question = chatInput.value.trim();
+  if (!question) return;
+
+  chatInput.value = "";
+
+  const userMsg: ChatMessage = { sender: "user", text: question };
+  if (!chatHistories.has(jobId)) {
+    chatHistories.set(jobId, []);
+  }
+  chatHistories.get(jobId)!.push(userMsg);
+  appendMessageToDOM(userMsg);
+
+  chatInput.disabled = true;
+  chatSubmit.disabled = true;
+
+  const loadingDiv = document.createElement("div");
+  loadingDiv.className = "chat-message bot loading";
+  loadingDiv.textContent = "Thinking...";
+  chatLog.appendChild(loadingDiv);
+  chatLog.scrollTop = chatLog.scrollHeight;
+
+  try {
+    const res = await api<{
+      answer: string;
+      citations: Array<{ start: number; end: number; speaker: string; text: string }>;
+    }>(`/jobs/${jobId}/chat`, {
+      method: "POST",
+      body: JSON.stringify({ question }),
+    });
+
+    loadingDiv.remove();
+
+    const botMsg: ChatMessage = {
+      sender: "bot",
+      text: res.answer,
+      citations: res.citations,
+    };
+    chatHistories.get(jobId)!.push(botMsg);
+    appendMessageToDOM(botMsg);
+  } catch (err) {
+    loadingDiv.remove();
+    const errorMsg: ChatMessage = {
+      sender: "bot",
+      text: `Error: ${getErrorMessage(err)}`,
+    };
+    appendMessageToDOM(errorMsg);
+  } finally {
+    chatInput.disabled = false;
+    chatSubmit.disabled = false;
+    chatInput.focus();
+  }
+});

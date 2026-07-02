@@ -21,6 +21,7 @@ import {
   isMeetingAnalysisEnabled,
   renderCleanTranscript,
 } from "../summarize";
+import { answerMeetingQuestion } from "../meetingChat";
 import type { MeetingTranscript } from "../models";
 import {
   authenticateUser,
@@ -234,6 +235,37 @@ app.get("/jobs/:id", async (req, res) => {
   if (!results) return res.status(404).json({ error: "job_not_found" });
 
   res.json(results);
+});
+
+app.post("/jobs/:id/chat", async (req, res) => {
+  const user = await requireUser(req, res);
+  if (!user) return;
+
+  const { question } = req.body;
+  if (typeof question !== "string" || !question.trim()) {
+    return res.status(400).json({ error: "missing_or_empty_question" });
+  }
+
+  if (question.length > 500) {
+    return res.status(400).json({ error: "question_too_long" });
+  }
+
+  try {
+    const results = await getMeetingResultsForJob(user.id, req.params.id);
+    if (!results) {
+      return res.status(404).json({ error: "job_not_found" });
+    }
+
+    if (!results.transcript || results.job.status !== "transcript_saved") {
+      return res.status(409).json({ error: "transcript_not_ready" });
+    }
+
+    const answer = await answerMeetingQuestion(results.transcript, question);
+    res.json(answer);
+  } catch (err) {
+    console.error("Chat error:", err);
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  }
 });
 
 // endpoint to fetch transcript for meeting
